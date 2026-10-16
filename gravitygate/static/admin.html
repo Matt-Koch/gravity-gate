@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Control</title>
+<link rel="stylesheet" href="/static/common.css">
+<style>
+  body { display: grid; grid-template-columns: 200px 1fr; min-height: 100vh; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); padding: 16px 10px; display: flex; flex-direction: column; gap: 4px; }
+  aside h1 { font-size: 1.05rem; margin: 0 6px 14px; color: var(--gold); }
+  aside button { text-align: left; background: none; border: 0; }
+  aside button.active { background: var(--panel-2); color: var(--gold); }
+  aside .foot { margin-top: auto; font-size: .8rem; color: var(--muted); padding: 6px; }
+  main { padding: 20px 24px; display: grid; gap: 16px; align-content: start; max-width: 1200px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .cols { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+  h2 { margin: 0 0 10px; font-size: 1.1rem; }
+  .big { font-size: 1.15rem; padding: 12px 20px; }
+  .heat-head { display: flex; justify-content: space-between; align-items: baseline; }
+  .heat-head .t { color: var(--gold); font-weight: 700; font-size: 1.2rem; }
+  .state { padding: 2px 10px; border-radius: 999px; font-weight: 600; font-size: .85rem; }
+  .state.staged { background: #12402c; color: var(--green); }
+  .state.results { background: #3a3315; color: var(--gold); }
+  .state.idle { background: var(--panel-2); color: var(--muted); }
+  #rawlog { font: 12px/1.4 ui-monospace, monospace; background: #050812; border-radius: 8px; padding: 8px; height: 160px; overflow: auto; white-space: pre-wrap; }
+  label { display: grid; gap: 4px; font-size: .9rem; color: var(--muted); }
+  .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .form label { min-width: 0; }
+  .form select, .form input { width: 100%; min-width: 0; }
+  .toast { position: fixed; bottom: 16px; right: 16px; background: var(--panel-2); border: 1px solid var(--line); padding: 10px 16px; border-radius: 8px; z-index: 9; }
+  .toast.err { border-color: var(--red); }
+  td input[type=checkbox] { transform: scale(1.3); }
+  .manual input { width: 90px; }
+  @media (max-width: 800px) { body { grid-template-columns: 1fr; } aside { flex-direction: row; overflow-x: auto; } aside h1, aside .foot { display: none; } .cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<aside>
+  <h1>🏁 Race Control</h1>
+  <button data-tab="race" class="active">Race</button>
+  <button data-tab="racers">Racers &amp; check-in</button>
+  <button data-tab="sessions">Sessions</button>
+  <button data-tab="standings">Standings</button>
+  <button data-tab="settings">Settings</button>
+  <div class="foot">Display: <a href="/display" target="_blank">/display</a><br>Spectators: <a href="/s" target="_blank">/s</a><br>QR poster: <a href="/poster" target="_blank">/poster</a></div>
+</aside>
+<main id="main"></main>
+<script src="/static/common.js"></script>
+<script>
+const { esc, fmt, ord, heatTitle, api } = Derby;
+const $ = (id) => document.getElementById(id);
+let tab = location.hash.slice(1) || 'race', st = null, raw = [];
+
+document.querySelectorAll('aside button').forEach((b) => b.onclick = () => setTab(b.dataset.tab));
+function setTab(t) {
+  tab = t; location.hash = t;
+  document.querySelectorAll('aside button').forEach((b) => b.classList.toggle('active', b.dataset.tab === t));
+  draw();
+}
+function toast(msg, err) {
+  const d = document.createElement('div'); d.className = 'toast' + (err ? ' err' : ''); d.textContent = msg;
+  document.body.appendChild(d); setTimeout(() => d.remove(), err ? 6000 : 2500);
+}
+async function act(path, body, okMsg) {
+  try { const r = await api(path, { method: 'POST', body: body || {} }); if (okMsg) toast(okMsg); return r; }
+  catch (e) { toast(e.message, true); throw e; }
+}
+window.act = act;
+
+Derby.on((msg, state) => {
+  if (msg.type === 'raw') { raw.push(new Date().toLocaleTimeString() + '  ' + msg.line); raw = raw.slice(-200); const r = $('rawlog'); if (r) { r.textContent = raw.join('\n'); r.scrollTop = 1e9; } }
+  if (msg.type === 'state') { st = state; if (!raw.length && st.timer?.last_raw) raw = [...st.timer.last_raw]; if (tab === 'race') drawRace(); }
+});
+Derby.connect();
+setTab(tab);
+window.addEventListener('hashchange', () => { const t = location.hash.slice(1); if (t && t !== tab) setTab(t); });
+
+function draw() {
+  ({ race: drawRace, racers: drawRacers, sessions: drawSessions, standings: drawStandings, settings: drawSettings }[tab])();
+}
+
+// ---------------------------------------------------------------- Race
+function drawRace() {
+  if (!st) return;
+  const h = st.current, m = st.display_mode;
+  const isSim = st.timer?.type === 'SimulatedTimer';
+  const focusInManual = document.activeElement?.closest?.('.manual');
+  if (focusInManual) return; // don't wipe what the operator is typing
+  $('main').innerHTML = `
+  <div class="cols">
+    <div class="card">
+      <div class="heat-head"><span class="t">${h ? esc(heatTitle(h)) : 'No heat staged'}</span>
+        <span class="state ${st.state}">${st.state === 'staged' ? '● Armed – waiting for timer' : st.state}</span></div>
+      <div class="muted">${st.session ? esc(st.session.name) + ` · ${st.heat_counts.done || 0} done, ${st.heat_counts.pending || 0} to go` : 'Pick or create a session under Sessions.'}</div>
+      ${h ? `<table class="manual" style="margin-top:10px"><tr><th>Lane</th><th>Racer</th><th>Time</th><th>Place</th><th>Manual time</th><th>Manual place</th><th>DNF</th></tr>
+        ${h.lanes.map((l) => `<tr><td>${l.lane}</td><td>#${esc(l.car_number)} ${esc(l.name)} <span class="muted">${esc(l.den)}</span></td>
+          <td class="num">${l.time != null ? Number(l.time).toFixed(4) : (l.dnf ? 'DNF' : '')}</td><td class="place-${l.place}">${ord(l.place)}</td>
+          <td><input data-lane="${l.lane}" data-f="time" inputmode="decimal" placeholder="2.5060"></td>
+          <td><input data-lane="${l.lane}" data-f="place" inputmode="numeric" placeholder="1"></td>
+          <td><input type="checkbox" data-lane="${l.lane}" data-f="dnf"></td></tr>`).join('')}</table>` : ''}
+      <div class="row" style="margin-top:14px">
+        <button class="primary big" onclick="act('/api/race/next')">Go to Next Race ⏭</button>
+        <button class="big" onclick="act('/api/race/rerun', {}, 'Rerun: timer re-armed')">Rerun Last Race ↺</button>
+        ${h ? `<button onclick="saveManual(${h.heat_id})">Save Manual Entry</button>` : ''}
+        ${h ? `<button onclick="act('/api/race/force')">Force results</button>` : ''}
+        ${h ? `<button class="warn" onclick="if(confirm('Skip this heat?')) act('/api/race/skip', {heat_id: ${h.heat_id}})">Skip heat</button>` : ''}
+        ${isSim && st.state === 'staged' ? `<button class="on" onclick="act('/api/race/simulate')">Drop gate (simulator)</button>` : ''}
+      </div>
+    </div>
+    <div class="card">
+      <h2>Projector display</h2>
+      <div class="row">
+        ${['race', 'standings', 'awards', 'bracket'].map((x) => `<button class="${m === x ? 'on' : ''}" onclick="act('/api/display', {mode: '${x}'})">${x[0].toUpperCase() + x.slice(1)}</button>`).join('')}
+        <button class="${m === 'idle' ? 'on' : ''}" onclick="act('/api/display', {mode: 'idle'})">Cancel Display</button>
+      </div>
+      ${m === 'awards' ? `<div class="row" style="margin-top:10px"><button class="primary" onclick="act('/api/awards/next')">Reveal next award (${st.awards_revealed})</button></div>` : ''}
+      <div class="row" style="margin-top:10px">
+        <button class="${st.sound ? 'on' : ''}" onclick="act('/api/settings', {sound: ${!st.sound}})">Sound ${st.sound ? 'On' : 'Off'}</button>
+      </div>
+      <h2 style="margin-top:16px">Timer</h2>
+      <div>${st.timer.connected ? '🟢 connected' : '🔴 not connected'} <span class="muted">${esc(st.timer.type)} ${esc(st.timer.port || '')} ${esc(st.timer.profile || '')}</span></div>
+      ${st.photo ? `<h2 style="margin-top:16px">Photo finish (${st.photo.margin_ms} ms)</h2><img src="${st.photo.images.still}" style="width:100%"><img src="${st.photo.images.strip}" style="width:100%;image-rendering:pixelated">` : ''}
+    </div>
+  </div>
+  <div class="cols">
+    <div class="card"><h2>On deck</h2><table><tr><th>Heat</th>${st.lanes.map((l) => `<th>Lane ${l}</th>`).join('')}</tr>
+      ${st.on_deck.map((d) => `<tr><td>${esc(heatTitle(d))}</td>${st.lanes.map((ln) => { const x = d.lanes.find((y) => y.lane === ln); return `<td>${x ? '#' + esc(x.car_number) + ' ' + esc(x.name) : ''}</td>`; }).join('')}</tr>`).join('')}</table></div>
+    <div class="card"><h2>Raw timer output</h2><div id="rawlog">${esc(raw.join('\n'))}</div></div>
+  </div>`;
+  const r = $('rawlog'); r.scrollTop = 1e9;
+}
+
+window.saveManual = async (heatId) => {
+  const entries = {};
+  document.querySelectorAll('.manual input').forEach((i) => {
+    const e = entries[i.dataset.lane] = entries[i.dataset.lane] || {};
+    if (i.dataset.f === 'dnf') e.dnf = i.checked;
+    else if (i.value.trim()) e[i.dataset.f] = Number(i.value);
+  });
+  if (!Object.values(entries).some((e) => e.time || e.place || e.dnf)) return toast('Enter times or places first', true);
+  document.activeElement.blur();
+  await act('/api/race/manual', { heat_id: heatId, entries }, 'Manual results saved');
+};
+
+// ---------------------------------------------------------------- Racers
+async function drawRacers() {
+  const racers = await api('/api/racers');
+  const dens = [...new Set(racers.map((r) => r.den))].sort();
+  const n = racers.filter((r) => r.checked_in).length;
+  $('main').innerHTML = `
+  <div class="card"><h2>Add racer</h2><div class="row">
+    <input id="nf" placeholder="First name"><input id="nl" placeholder="Last name">
+    <input id="nd" placeholder="Den" list="dens"><datalist id="dens">${dens.map((d) => `<option>${esc(d)}</option>`).join('')}</datalist>
+    <input id="nc" placeholder="Car # (auto)" style="width:110px" inputmode="numeric">
+    <button class="primary" onclick="addRacer()">Add</button></div></div>
+  <div class="card"><h2>Import roster</h2>
+    <div class="row"><button onclick="act('/api/roster/import', {}, 'Roster pulled').then(drawRacers)">Pull from Google Sheets</button>
+      <input type="file" id="csvfile" accept=".csv,text/csv"><button onclick="importFile()">Import CSV</button>
+      <a href="/api/roster.csv"><button>Export CSV</button></a></div>
+    <p class="muted">Columns are matched by name: Car #, First, Last (or Name), Den, Rank, Checked In. Set the sheet link under Settings.</p></div>
+  <div class="card"><h2>Racers <span class="badge">${n} of ${racers.length} checked in</span></h2>
+    <table><tr><th>Car</th><th>Name</th><th>Den</th><th>Checked in</th><th>Inspected</th><th></th></tr>
+    ${racers.map((r) => `<tr><td><input value="${esc(r.car_number)}" style="width:70px" onchange="upd(${r.id}, {car_number: Number(this.value)})"></td>
+      <td>${esc(r.first_name)} ${esc(r.last_name)}</td>
+      <td><input value="${esc(r.den)}" style="width:120px" list="dens" onchange="upd(${r.id}, {den: this.value})"></td>
+      <td><input type="checkbox" ${r.checked_in ? 'checked' : ''} onchange="upd(${r.id}, {checked_in: this.checked ? 1 : 0})"></td>
+      <td><input type="checkbox" ${r.passed_inspection ? 'checked' : ''} onchange="upd(${r.id}, {passed_inspection: this.checked ? 1 : 0})"></td>
+      <td><button class="warn" onclick="if(confirm('Delete ${esc(r.first_name)}?')) api('/api/racers/${r.id}', {method:'DELETE'}).then(drawRacers)">✕</button></td></tr>`).join('')}</table></div>`;
+}
+window.upd = (id, body) => api('/api/racers/' + id, { method: 'PATCH', body }).catch((e) => toast(e.message, true));
+window.addRacer = async () => {
+  const body = { first_name: $('nf').value, last_name: $('nl').value, den: $('nd').value, checked_in: true };
+  if ($('nc').value) body.car_number = Number($('nc').value);
+  if (!body.first_name) return toast('First name required', true);
+  await act('/api/racers', body, 'Added'); drawRacers();
+};
+window.importFile = async () => {
+  const f = $('csvfile').files[0]; if (!f) return toast('Choose a CSV file', true);
+  const r = await act('/api/roster/import', { csv: await f.text() });
+  toast(`Added ${r.added}, updated ${r.updated}`); drawRacers();
+};
+
+// ---------------------------------------------------------------- Sessions
+async function drawSessions() {
+  const [sessions, racers] = await Promise.all([api('/api/sessions'), api('/api/racers')]);
+  const dens = [...new Set(racers.map((r) => r.den))].sort();
+  const chartSessions = sessions.filter((s) => s.kind === 'chart');
+  $('main').innerHTML = `
+  <div class="cols">
+    <div class="card"><h2>New qualifier race</h2>
+      <p class="muted">Standings are always reported per den and pack-wide, scored by the Standings setting (now: <b id="smode"></b>). Use the top of each den to seed the champions bracket.</p>
+      <div class="form">
+        <label>Name<input id="cn" value="Qualifiers"></label>
+        <label>Format<select id="cf" onchange="estimate()"><option value="rotation">Round robin through the lanes: every car runs every lane</option><option value="round_robin">Every car meets every other car</option></select></label>
+        <label>Runs per lane<input id="cr" type="number" min="1" max="6" onchange="estimate()" oninput="estimate()"></label>
+        <label id="cscl">Meet everyone within<select id="csc" onchange="estimate()"><option value="den">Each den (dens alternate on the track)</option><option value="pack">Whole pack</option></select></label>
+      </div>
+      <p>Dens: ${dens.map((d) => `<label style="display:inline"><input type="checkbox" class="den" value="${esc(d)}" checked onchange="estimate()"> ${esc(d || 'Unassigned')}</label>`).join(' &nbsp; ')}</p>
+      <p class="muted" id="est"></p>
+      <button class="primary" onclick="newChart()">Create &amp; activate</button></div>
+    <div class="card"><h2>New elimination bracket</h2>
+      <div class="form">
+        <label>Name<input id="en" value="Champions Bracket"></label>
+        <label>Format<select id="el"><option value="2">Double elimination</option><option value="1">Single elimination</option><option value="3">Triple elimination</option></select></label>
+        <label>Losers per heat<select id="ek"><option value="half">Bottom half</option><option value="last">Last place only</option></select></label>
+        <label>Matchups<select id="er"><option value="single">One run</option><option value="lanes">Run every lane, total time</option></select></label>
+        <label>Seed from<select id="esrc"><option value="">Checked-in racers (selected dens)</option>${chartSessions.map((s) => `<option value="${s.id}">Top of each den in “${esc(s.name)}”</option>`).join('')}</select></label>
+        <label>Top per den<input id="epd" type="number" value="3" min="1"></label>
+      </div>
+      <button class="primary" style="margin-top:10px" onclick="newElim()">Create &amp; activate</button></div>
+  </div>
+  <div class="card"><h2>Sessions</h2><table><tr><th>Name</th><th>Kind</th><th>Status</th><th></th></tr>
+    ${sessions.map((s) => `<tr><td>${esc(s.name)}</td><td>${s.kind === 'chart' ? 'Chart' : ['', 'Single', 'Double', 'Triple'][s.config.max_losses] + ' elimination'}</td><td>${esc(s.status)}${st?.session?.id === s.id ? ' <span class="badge">active</span>' : ''}</td>
+      <td class="row"><button onclick="act('/api/sessions/${s.id}/activate', {}, 'Activated')">Activate</button>
+      <button onclick="showHeats(${s.id})">Heats</button>
+      <button class="warn" onclick="if(confirm('Delete session and its results?')) api('/api/sessions/${s.id}', {method:'DELETE'}).then(drawSessions)">Delete</button></td></tr>`).join('')}</table></div>
+  <div class="card hidden" id="heats"></div>`;
+  window._racers = racers;
+  const cfg = await api('/api/settings');
+  $('cr').value = cfg.runs_per_lane;
+  $('smode').textContent = (cfg.standings_method === 'points' ? 'heat points' : 'average run time')
+    + ({ slowest: ', drop slowest run', fastest_slowest: ', drop fastest & slowest runs' }[cfg.drop_runs] || '');
+  estimate();
+}
+// Heat-count estimate so the race director can pick round robin scope before committing.
+window.estimate = () => {
+  const el = $('est'); if (!el) return;
+  const lanes = st ? st.lanes.length : 3, dens = selectedDens(), reps = Number($('cr').value) || 1;
+  const rot = $('cf').value === 'rotation';
+  $('cscl').classList.toggle('hidden', rot);
+  const pool = (window._racers || []).filter((r) => r.checked_in && dens.includes(r.den));
+  const rr = (n) => n < 2 ? 0 : n <= lanes ? lanes : Math.ceil(n * (n - 1) / 2 / (lanes * (lanes - 1) / 2) * 1.12);
+  let heats;
+  if (rot) heats = Math.max(pool.length, lanes) * reps;
+  else if ($('csc').value === 'den') heats = dens.reduce((t, d) => t + rr(pool.filter((r) => r.den === d).length), 0) * reps;
+  else heats = rr(pool.length) * reps;
+  const perCar = rot ? `${lanes * reps} races per car (${lanes} lanes × ${reps})` : 'every pairing raced';
+  el.textContent = `${pool.length} checked-in cars · ${perCar} → about ${heats} heats (~${Math.round(heats * 40 / 60)} min at 40 s per heat)`;
+};
+const selectedDens = () => [...document.querySelectorAll('.den:checked')].map((c) => c.value);
+window.newChart = async () => {
+  const r = await act('/api/sessions', { kind: 'chart', name: $('cn').value, format: $('cf').value, scope: $('csc').value, runs_per_lane: Number($('cr').value), dens: selectedDens() });
+  toast(`Created with ${r.heats} heats`); drawSessions();
+};
+window.newElim = async () => {
+  const body = { kind: 'elimination', name: $('en').value, max_losses: Number($('el').value), losers_per_heat: $('ek').value, runs_per_matchup: $('er').value, dens: selectedDens() };
+  if ($('esrc').value) { body.seed_from_session = Number($('esrc').value); body.per_den = Number($('epd').value); }
+  const r = await act('/api/sessions', body); toast(`Bracket created, ${r.heats} heats in round 1`); drawSessions();
+};
+window.showHeats = async (id) => {
+  const heats = await api(`/api/sessions/${id}/heats`);
+  const el = $('heats'); el.classList.remove('hidden');
+  el.innerHTML = `<h2>Heats</h2><table><tr><th>#</th><th>Heat</th><th>Status</th><th>Lanes</th></tr>${heats.map((h) => `<tr><td>${h.seq}</td><td>${esc(heatTitle(h))}</td><td>${h.status}</td>
+    <td>${h.lanes.map((l) => `L${l.lane}: #${esc(l.car_number)} ${esc(l.name)}${l.time != null ? ` <b class="place-${l.place}">${Number(l.time).toFixed(4)}</b>` : ''}`).join(' · ')}</td></tr>`).join('')}</table>
+    <p class="row"><span class="muted">Late arrival?</span><select id="late">${(await api('/api/racers')).map((r) => `<option value="${r.id}">#${r.car_number} ${esc(r.first_name)} ${esc(r.last_name)}</option>`).join('')}</select>
+    <button onclick="act('/api/sessions/${id}/late-racer', {racer_id: Number($('late').value)}, 'Make-up heats added')">Add make-up heats</button></p>`;
+};
+
+// ---------------------------------------------------------------- Standings
+async function drawStandings() {
+  const [s, awards] = await Promise.all([api('/api/standings'), api('/api/awards')]);
+  const table = (rows) => `<table><tr><th>Rank</th><th>Car</th><th>Name</th><th>Den</th><th>${s.kind === 'elimination' ? 'Losses' : 'Average'}</th><th>Best</th><th>Points</th><th>Runs</th></tr>
+    ${rows.map((r) => `<tr><td class="place-${r.rank}">${r.rank}${r.tied ? '=' : ''}</td><td>${esc(r.car_number)}</td><td>${esc(r.name)}</td><td>${esc(r.den)}</td>
+    <td class="num">${s.kind === 'elimination' ? r.losses : fmt(r.average)}</td><td class="num">${fmt(r.best)}</td><td>${r.points ?? ''}</td><td>${r.runs ?? ''}</td></tr>`).join('')}</table>`;
+  $('main').innerHTML = `<div class="row"><a href="/api/results.csv"><button>Download results CSV</button></a>
+      <button onclick="act('/api/sync/push', {}, 'Pushed to Google Sheets')">Push to Google Sheets now</button></div>
+    <div class="card"><h2>Awards</h2><table>${awards.map((a) => `<tr><td>${esc(a.category)}</td><td class="place-${a.place}">${ord(a.place)}${a.tied ? ' (tie!)' : ''}</td><td>#${esc(a.car_number)} ${esc(a.name)}</td></tr>`).join('')}</table></div>
+    ${Object.entries(s.dens || {}).map(([d, rows]) => `<div class="card"><h2>${esc(d || 'Unassigned')}</h2>${table(rows)}</div>`).join('')}
+    <div class="card"><h2>Pack overall</h2>${table(s.overall || [])}</div>`;
+}
+
+// ---------------------------------------------------------------- Settings
+async function drawSettings() {
+  const [s, ports, syncSt] = await Promise.all([api('/api/settings'), api('/api/serial-ports'), api('/api/sync/status')]);
+  const opt = (v, cur, label) => `<option value="${esc(v)}" ${String(v) === String(cur) ? 'selected' : ''}>${esc(label ?? v)}</option>`;
+  $('main').innerHTML = `
+  <div class="card"><h2>Event</h2><div class="form">
+    <label>Event name<input data-k="event_name" value="${esc(s.event_name)}"></label>
+    <label>Lanes on track<input data-k="lane_count" data-num type="number" min="2" max="8" value="${s.lane_count}"></label>
+    <label>Runs per lane (qualifiers)<input data-k="runs_per_lane" data-num type="number" min="1" max="6" value="${s.runs_per_lane}"></label>
+    <label>Standings<select data-k="standings_method">${opt('average', s.standings_method, 'Average run time')}${opt('points', s.standings_method, 'Heat points (fastest = lanes, slowest = 1)')}</select></label>
+    <label>Drop runs before averaging<select data-k="drop_runs">${opt('none', s.drop_runs, 'Keep every run')}${opt('slowest', s.drop_runs, 'Drop slowest run')}${opt('fastest_slowest', s.drop_runs, 'Drop fastest & slowest (1st and last)')}</select></label>
+    <label>Lanes out of service (e.g. 2)<input data-k="lane_mask" data-list value="${esc((s.lane_mask || []).join(','))}"></label>
+    <label>DNF time (s)<input data-k="dnf_time" data-num value="${s.dnf_time}"></label>
+    <label>Track length (ft)<input data-k="track_length_ft" data-num value="${s.track_length_ft}"></label>
+    <label>Scale factor<input data-k="scale_factor" data-num value="${s.scale_factor}"></label>
+    <label>Auto-advance after results<select data-k="auto_advance" data-bool>${opt(false, s.auto_advance, 'Off')}${opt(true, s.auto_advance, 'On')}</select></label>
+    <label>Auto-advance delay (s)<input data-k="auto_advance_s" data-num value="${s.auto_advance_s}"></label>
+    <label>Admin PIN (blank = none)<input data-k="admin_pin" value="${esc(s.admin_pin)}"></label>
+  </div></div>
+  <div class="card"><h2>Timer</h2><div class="form">
+    <label>Source<select data-k="timer_kind">${opt('serial', s.timer_kind, 'Serial port on this Pi')}${opt('remote', s.timer_kind, 'Bottom-of-track node Pi')}${opt('simulator', s.timer_kind, 'Simulator (rehearsal)')}${opt('none', s.timer_kind, 'None (manual entry)')}</select></label>
+    <label>Serial port<input data-k="timer_port" value="${esc(s.timer_port)}" list="ports"><datalist id="ports">${ports.map((p) => `<option value="${esc(p.device)}">${esc(p.description)}</option>`).join('')}</datalist></label>
+    <label>Timer model<select data-k="timer_profile">${Object.entries(s.timer_profiles).map(([k, p]) => opt(k, s.timer_profile, p.name + (p.verified ? '' : ' *'))).join('')}</select></label>
+    <label>Node token<input data-k="node_token" value="${esc(s.node_token)}"></label>
+  </div><p class="muted">* verify against your gantry with the raw output log on the Race tab before race day.</p></div>
+  <div class="card"><h2>Photo finish</h2><div class="form">
+    <label>Enabled<select data-k="photo_enabled" data-bool>${opt(false, s.photo_enabled, 'Off')}${opt(true, s.photo_enabled, 'On')}</select></label>
+    <label>Trigger when margin under (ms)<input data-k="photo_margin_ms" data-num value="${s.photo_margin_ms}"></label>
+    <label>Post-roll after timer reports (s)<input data-k="photo_post_roll_s" data-num value="${s.photo_post_roll_s}"></label>
+    <label>Camera on this Pi<select data-k="camera_kind">${opt('none', s.camera_kind, 'None / on node Pi')}${opt('pi', s.camera_kind, 'Raspberry Pi camera')}${opt('synthetic', s.camera_kind, 'Synthetic (demo)')}</select></label>
+  </div><p class="muted">With the camera on, every heat's finish is captured for the phone gallery; the projector pops up only finishes closer than the margin above.</p></div>
+  <div class="card"><h2>Audience phones</h2><div class="form">
+    <label>Public URL (blank = auto-detect)<input data-k="public_url" value="${esc(s.public_url)}" placeholder="http://10.42.0.1:8000"></label>
+    <label>Wi-Fi name for join QR<input data-k="wifi_ssid" value="${esc(s.wifi_ssid)}"></label>
+    <label>Wi-Fi password<input data-k="wifi_password" value="${esc(s.wifi_password)}"></label>
+  </div><div class="row" style="margin-top:10px"><img src="/api/qr.svg" style="width:110px;background:#fff;border-radius:8px;padding:4px" alt="Live results QR code">
+    <a href="/poster" target="_blank"><button>Printable QR poster</button></a></div></div>
+  <div class="card"><h2>Google Sheets</h2><div class="form">
+    <label>Roster sheet link (published CSV or share link)<input data-k="roster_csv_url" value="${esc(s.roster_csv_url)}"></label>
+    <label>Apps Script web app URL (two-way sync)<input data-k="sync_url" value="${esc(s.sync_url)}"></label>
+    <label>Sync secret<input data-k="sync_secret" value="${esc(s.sync_secret)}"></label>
+  </div><p class="muted">Results sync: ${syncSt.configured ? (syncSt.last_ok ? 'last pushed ' + new Date(syncSt.last_ok * 1000).toLocaleTimeString() : 'not pushed yet') : 'not configured'}${syncSt.last_error ? ' · last error: ' + esc(syncSt.last_error) : ''}${syncSt.pending ? ' · changes pending' : ''}</p></div>
+  <button class="primary big" onclick="saveSettings()">Save settings</button>`;
+}
+window.saveSettings = async () => {
+  const body = {};
+  document.querySelectorAll('[data-k]').forEach((el) => {
+    let v = el.value;
+    if (el.hasAttribute('data-num')) v = Number(v);
+    if (el.hasAttribute('data-bool')) v = v === 'true';
+    if (el.hasAttribute('data-list')) v = v.split(',').map((x) => Number(x.trim())).filter(Boolean);
+    body[el.dataset.k] = v;
+  });
+  if (body.admin_pin) localStorage.setItem('derbyPin', body.admin_pin);
+  const r = await act('/api/settings', body, 'Settings saved');
+  if (r.timer_restarted) toast('Timer restarted');
+};
+</script>
+</body>
+</html>

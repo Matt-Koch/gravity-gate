@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<title>Derby Live</title>
+<link rel="stylesheet" href="/static/common.css">
+<style>
+  body { padding-bottom: 76px; }
+  header { position: sticky; top: 0; z-index: 3; background: rgba(11, 16, 32, .92); backdrop-filter: blur(8px);
+    padding: 12px 16px 10px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 1.05rem; }
+  header .sub { color: var(--muted); font-size: .85rem; }
+  main { padding: 12px 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; max-width: 640px; margin: 0 auto; }
+  main > * { min-width: 0; }
+  nav { position: fixed; bottom: 0; left: 0; right: 0; display: grid; grid-template-columns: repeat(5, 1fr);
+    background: var(--panel); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); z-index: 3; }
+  nav button { background: none; border: 0; border-radius: 0; padding: 10px 2px 8px; font-size: .72rem; color: var(--muted); }
+  nav button span { display: block; font-size: 1.3rem; }
+  nav button.active { color: var(--gold); }
+  h2 { margin: 4px 0; font-size: 1rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  .heat-title { font-weight: 700; color: var(--gold); }
+  .lane-row { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .lane-row:last-child { border-bottom: 0; }
+  .lane-no { width: 30px; height: 30px; border-radius: 50%; background: var(--panel-2); display: grid; place-items: center; font-weight: 700; }
+  .who b { display: block; }
+  .who small { color: var(--muted); }
+  .res { text-align: right; font-variant-numeric: tabular-nums; }
+  .res b { display: block; font-size: 1.15rem; }
+  .star { background: none; border: 0; padding: 0 6px; font-size: 1.2rem; color: var(--muted); }
+  .star.on { color: var(--gold); }
+  .mine { background: rgba(255, 210, 63, .08); border-radius: 8px; }
+  .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 6px; animation: blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity: .3; } }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .stat .v { font-size: 1.5rem; font-weight: 800; }
+  .stat .l { color: var(--muted); font-size: .8rem; }
+  .bar { height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--blue); }
+  .photo img { width: 100%; border-radius: 8px; margin-top: 8px; image-rendering: pixelated; }
+  .gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .thumb { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px; text-align: left; }
+  .thumb img { width: 100%; aspect-ratio: 16 / 5; object-fit: cover; border-radius: 6px; display: block; }
+  .thumb .cap { font-size: .78rem; margin-top: 4px; }
+  .thumb.close { border-color: var(--gold); }
+  #lightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, .92); z-index: 9; display: flex; flex-direction: column;
+    justify-content: center; padding: 16px; gap: 10px; overflow: auto; }
+  #lightbox img { width: 100%; border-radius: 8px; image-rendering: pixelated; }
+  #lightbox .x { position: absolute; top: 12px; right: 12px; font-size: 1.4rem; }
+  .shot { background: none; border: 0; padding: 0 4px; font-size: 1.1rem; }
+  .bl-scroll { overflow: auto; -webkit-overflow-scrolling: touch; margin: 0 -16px; padding: 4px 16px 12px; }
+  .chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+  .chips button { white-space: nowrap; padding: 4px 12px; border-radius: 999px; font-size: .85rem; }
+  input[type=search] { width: 100%; }
+  .lost { color: var(--red); text-decoration: line-through; }
+  .empty { color: var(--muted); text-align: center; padding: 24px 0; }
+</style>
+</head>
+<body>
+<header><h1 id="event">Pinewood Derby</h1><div class="sub" id="sub">Connecting…</div></header>
+<main id="main"></main>
+<nav id="nav">
+  <button data-tab="now" class="active"><span>🏁</span>Now</button>
+  <button data-tab="next"><span>⏭️</span>Up next</button>
+  <button data-tab="mine"><span>⭐</span>My racers</button>
+  <button data-tab="leaders"><span>🏆</span>Leaders</button>
+  <button data-tab="stats"><span>📊</span>Stats</button>
+</nav>
+<div id="lightbox" class="hidden" onclick="if(event.target===this)closeShot()"></div>
+<script src="/static/common.js"></script>
+<script src="/static/bracket.js"></script>
+<script>
+const { esc, fmt, ord, heatTitle, api } = Derby;
+const $ = (id) => document.getElementById(id);
+let tab = location.hash.slice(1) || 'now', st = null, denFilter = null, query = '', bracketFit = false;
+let follows = new Set(JSON.parse(localStorage.getItem('derbyFollow') || '[]'));
+const saveFollows = () => localStorage.setItem('derbyFollow', JSON.stringify([...follows]));
+
+document.querySelectorAll('nav button').forEach((b) => b.onclick = () => setTab(b.dataset.tab));
+function setTab(t) {
+  tab = t; location.hash = t;
+  document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === t));
+  draw();
+}
+
+Derby.on((msg, state) => {
+  if (msg.type === 'state') { st = state; header(); if (['now', 'next'].includes(tab)) draw(); else drawSoon(); }
+  if (msg.type === 'photo' && tab === 'now') draw();
+});
+Derby.connect();
+setTab(tab);
+window.addEventListener('hashchange', () => { const t = location.hash.slice(1); if (t && t !== tab) setTab(t); });
+
+let soon;
+function drawSoon() { clearTimeout(soon); soon = setTimeout(draw, 600); }
+
+function header() {
+  $('event').textContent = st.event_name;
+  const c = st.heat_counts || {};
+  $('sub').innerHTML = st.session ? `<span class="live-dot"></span>${esc(st.session.name)} · ${c.done || 0} of ${(c.done || 0) + (c.pending || 0)} heats` : 'Waiting for racing to start';
+}
+
+window.toggleFollow = (id) => { follows.has(id) ? follows.delete(id) : follows.add(id); saveFollows(); draw(); };
+const star = (id) => `<button class="star ${follows.has(id) ? 'on' : ''}" onclick="toggleFollow(${id})" aria-label="Follow">★</button>`;
+
+// Finish photos: every heat is captured when the camera is on.
+window.openShot = (photo, title, lanes) => {
+  const lb = $('lightbox');
+  const close = photo.close ? `📸 Photo finish · ${photo.margin_ms?.toFixed(1)} ms` : `Finish line${photo.margin_ms != null ? ' · margin ' + photo.margin_ms.toFixed(1) + ' ms' : ''}`;
+  lb.innerHTML = `<button class="x" onclick="closeShot()">✕</button><div class="heat-title">${esc(close)}</div><div class="muted">${esc(title || '')}</div>
+    <img src="${photo.images.still}" alt="Finish line at the winner's crossing">
+    ${photo.images.strip ? `<img src="${photo.images.strip}" alt="Slit-scan photo finish strip"><small class="muted">Strip: the finish line over time — left car crossed first.</small>` : ''}
+    ${lanes || ''}`;
+  lb.classList.remove('hidden');
+};
+window.closeShot = () => $('lightbox').classList.add('hidden');
+const shots = new Map();
+function shotButton(key, photo, title, lanes) {
+  if (!photo) return '';
+  shots.set(key, [photo, title, lanes]);
+  return `<button class="shot" onclick="openShot(...shots.get('${key}'))" aria-label="See finish photo">📸</button>`;
+}
+function resultsTable(h) {
+  return `<table>${[...h.lanes].sort((a, b) => (a.place || 99) - (b.place || 99)).map((l) => `<tr><td class="place-${l.place}">${l.dnf ? 'DNF' : ord(l.place)}</td><td>${esc(l.name)}</td><td class="muted">L${l.lane}</td><td class="num">${fmt(l.time)}</td></tr>`).join('')}</table>`;
+}
+
+function laneRows(h) {
+  return h.lanes.map((l) => `<div class="lane-row ${follows.has(l.racer_id) ? 'mine' : ''}">
+    <div class="lane-no">${l.lane}</div>
+    <div class="who"><b>${esc(l.name)}</b><small>#${esc(l.car_number)} · ${esc(l.den)}</small></div>
+    <div class="res">${l.time != null || l.dnf ? `<b class="place-${l.place}">${l.dnf ? 'DNF' : ord(l.place)}</b><span class="muted">${fmt(l.time)}</span>` : star(l.racer_id)}</div>
+  </div>`).join('');
+}
+
+async function draw() {
+  const main = $('main');
+  if (!st) { main.innerHTML = '<div class="empty">Connecting…</div>'; return; }
+  try {
+    if (tab === 'now') return drawNow(main);
+    if (tab === 'next') return drawNext(main);
+    if (tab === 'mine') return await drawMine(main);
+    if (tab === 'leaders') return await drawLeaders(main);
+    if (tab === 'stats') return await drawStats(main);
+  } catch (e) { main.innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; }
+}
+
+function drawNow(main) {
+  const h = st.current;
+  let html = '';
+  if (h) {
+    const live = st.state === 'staged';
+    html += `<div class="card"><div class="heat-title">${live ? '<span class="live-dot"></span>On the track' : 'Results'} · ${esc(heatTitle(h))}</div>${laneRows(h)}</div>`;
+  } else {
+    html += '<div class="card empty">No heat on the track right now.</div>';
+  }
+  if (st.photo && h && st.photo.heat_id === h.heat_id) {
+    const p = st.photo;
+    shots.set('current', [p, heatTitle(h), resultsTable(h)]);
+    html += `<div class="card photo" onclick="openShot(...shots.get('current'))"><div class="heat-title">${p.close ? '📸 Photo finish' : 'Finish line'} · ${p.margin_ms != null ? p.margin_ms.toFixed(1) + ' ms margin' : ''}</div>
+      <img src="${p.images.still}" alt="Finish line"><div class="muted" style="font-size:.8rem">Tap to enlarge</div></div>`;
+  }
+  if (st.on_deck?.length) html += `<div class="card"><h2>Next up</h2>${st.on_deck[0] ? `<div class="muted">${esc(heatTitle(st.on_deck[0]))}</div>${laneRows(st.on_deck[0])}` : ''}</div>`;
+  html += '<div id="finishes"></div>';
+  main.innerHTML = html;
+  loadFinishes();
+}
+
+let finishesKey = '';
+async function loadFinishes() {
+  const box = $('finishes');
+  if (!box) return;
+  const list = await api('/api/finishes?limit=10').catch(() => []);
+  if (!list.length) return;
+  box.innerHTML = `<div class="card"><h2>Recent finishes</h2><div class="gallery">${list.map((f) => {
+    shots.set('f' + f.heat_id, [f.photo, heatTitle(f), resultsTable(f)]);
+    const win = f.lanes.find((l) => l.place === 1);
+    return `<button class="thumb ${f.photo.close ? 'close' : ''}" onclick="openShot(...shots.get('f${f.heat_id}'))">
+      <img src="${f.photo.images.still}" alt="" loading="lazy"><div class="cap">${esc(heatTitle(f))}<br>
+      <b>${win ? esc(win.name) : ''}</b>${f.photo.margin_ms != null ? ` <span class="muted">by ${f.photo.margin_ms.toFixed(0)} ms</span>` : ''}</div></button>`;
+  }).join('')}</div></div>`;
+}
+
+function drawNext(main) {
+  const deck = st.on_deck || [];
+  main.innerHTML = deck.length ? deck.map((d, i) => `<div class="card"><div class="heat-title">${i === 0 ? 'Next · ' : `In ${i + 1} heats · `}${esc(heatTitle(d))}</div>${laneRows(d)}</div>`).join('')
+    : '<div class="card empty">No more heats scheduled.</div>';
+}
+
+async function drawMine(main) {
+  const racers = await api('/api/racers');
+  const dens = [...new Set(racers.map((r) => r.den))].sort();
+  let html = '';
+  if (follows.size) {
+    const details = await Promise.all([...follows].map((id) => api('/api/racers/' + id).catch(() => null)));
+    html += details.filter(Boolean).map((d) => {
+      const times = d.runs.filter((r) => !r.dnf).map((r) => r.time);
+      const avg = times.length ? times.reduce((a, b) => a + b, 0) / times.length : null;
+      const nxt = d.upcoming[0];
+      return `<div class="card mine"><div style="display:flex;justify-content:space-between;align-items:center">
+        <div><b>${esc(d.name)}</b> <span class="muted">#${esc(d.car_number)} · ${esc(d.den)}</span></div>${star(d.racer_id)}</div>
+        <div class="stat-grid" style="margin-top:10px">
+          <div class="stat"><div class="v">${d.den_rank ? ord(d.den_rank) : '—'}</div><div class="l">in ${esc(d.den)}</div></div>
+          <div class="stat"><div class="v">${avg ? fmt(avg) : '—'}</div><div class="l">average · ${d.runs.length} runs</div></div>
+        </div>
+        <p>${nxt ? (nxt.heats_away === 0 ? '🚦 <b>Racing next, lane ' + nxt.lane + '</b>' : `Next race in <b>${nxt.heats_away} heats</b> · lane ${nxt.lane}`) : '<span class="muted">No more races scheduled</span>'}</p>
+        ${d.runs.length ? `<table>${d.runs.map((r, i) => `<tr><td>Lane ${r.lane}</td><td class="place-${r.place}">${r.dnf ? 'DNF' : ord(r.place)}</td><td class="num">${fmt(r.time)}</td>
+          <td>${shotButton(`r${d.racer_id}-${i}`, r.photo, `${d.name} · lane ${r.lane}`)}</td></tr>`).join('')}</table>` : ''}
+      </div>`;
+    }).join('');
+  } else {
+    html += '<div class="card muted">Tap ★ next to your Scout to follow them. You\'ll see their next race, lane, times and rank here.</div>';
+  }
+  const list = racers.filter((r) => (!denFilter || r.den === denFilter) && (`${r.first_name} ${r.last_name} ${r.car_number}`).toLowerCase().includes(query));
+  html += `<div class="card"><h2>Find a racer</h2><input type="search" id="q" placeholder="Name or car number" value="${esc(query)}">
+    <div class="chips" style="margin-top:8px"><button class="${!denFilter ? 'on' : ''}" data-den="">All</button>${dens.map((d) => `<button class="${denFilter === d ? 'on' : ''}" data-den="${esc(d)}">${esc(d)}</button>`).join('')}</div>
+    <table>${list.slice(0, 60).map((r) => `<tr><td>#${esc(r.car_number)}</td><td>${esc(r.first_name)} ${esc(r.last_name)}</td><td class="muted">${esc(r.den)}</td><td>${star(r.id)}</td></tr>`).join('')}</table></div>`;
+  main.innerHTML = html;
+  const q = $('q');
+  q.oninput = () => { query = q.value.toLowerCase(); drawMine(main).then(() => { const n = $('q'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }); };
+  main.querySelectorAll('[data-den]').forEach((b) => b.onclick = () => { denFilter = b.dataset.den || null; drawMine(main); });
+}
+
+async function drawLeaders(main) {
+  const s = await api('/api/standings');
+  if (s.kind === 'elimination') {
+    const b = await api('/api/bracket');
+    main.innerHTML = `${b.champion ? `<div class="card"><div class="heat-title">🏆 Champion: ${esc(b.champion.name)}</div></div>` : ''}
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><h2>Bracket</h2>
+        <button id="blzoom" style="padding:4px 10px;font-size:.8rem">${bracketFit ? 'Zoom in' : 'Whole bracket'}</button></div>
+        <div class="muted" style="font-size:.8rem">${bracketFit ? 'Tap “Zoom in” to read names' : 'Swipe sideways'} · gold = advances, red dashes = drops to Bracket B · your racers in blue</div>
+        <div class="bl-scroll" id="bl"></div></div>
+      ${Object.entries(b.brackets || {}).map(([k, rs]) => `<div class="card"><h2>${k === 'A' ? 'Bracket A · undefeated' : `Bracket ${k} · ${k.charCodeAt(0) - 65} loss${k === 'B' ? '' : 'es'}`}</h2>
+        ${rs.map((r) => `<div class="${follows.has(r.racer_id) ? 'mine' : ''}">#${esc(r.car_number)} ${esc(r.name)} <span class="muted">${esc(r.den)}</span></div>`).join('')}</div>`).join('')}`;
+    BracketLines.render($('bl'), b, { follow: follows, fit: bracketFit ? 'width' : false });
+    if (!bracketFit) $('bl').scrollLeft = BracketLines.latestX(b);  // open on the newest round
+    $('blzoom').onclick = () => { bracketFit = !bracketFit; drawLeaders(main); };
+    return;
+  }
+  const dens = Object.keys(s.dens);
+  const rows = denFilter && s.dens[denFilter] ? s.dens[denFilter] : s.overall;
+  main.innerHTML = `<div class="chips"><button class="${!denFilter ? 'on' : ''}" data-den="">Pack</button>${dens.map((d) => `<button class="${denFilter === d ? 'on' : ''}" data-den="${esc(d)}">${esc(d || 'Unassigned')}</button>`).join('')}</div>
+    <div class="card"><table><tr><th>#</th><th>Racer</th><th>${s.method === 'points' ? 'Pts' : 'Avg'}</th><th></th></tr>
+    ${rows.map((r) => `<tr class="${follows.has(r.racer_id) ? 'mine' : ''}"><td class="place-${r.rank}">${r.rank}${r.tied ? '=' : ''}</td>
+      <td>${esc(r.name)}<br><small class="muted">#${esc(r.car_number)} · ${esc(r.den)} · ${r.runs} runs</small></td>
+      <td class="num">${s.method === 'points' ? r.points : fmt(r.average)}</td><td>${star(r.racer_id)}</td></tr>`).join('') || '<tr><td colspan=4 class="empty">No results yet</td></tr>'}</table></div>`;
+  main.querySelectorAll('[data-den]').forEach((b) => b.onclick = () => { denFilter = b.dataset.den || null; drawLeaders(main); });
+}
+
+async function drawStats(main) {
+  const s = await api('/api/stats');
+  if (!s.runs) { main.innerHTML = '<div class="card empty">Stats appear after the first heat.</div>'; return; }
+  const f = s.fastest;
+  const lanes = s.lanes || [];
+  const lo = Math.min(...lanes.map((l) => l.average)), hi = Math.max(...lanes.map((l) => l.average));
+  main.innerHTML = `
+    <div class="stat-grid">
+      <div class="stat"><div class="v">${fmt(f.time)}</div><div class="l">Fastest run · ${esc(f.name)}</div></div>
+      <div class="stat"><div class="v">${f.scale_mph}</div><div class="l">Scale mph (real ${f.real_mph} mph)</div></div>
+      <div class="stat"><div class="v">${s.closest_finish ? s.closest_finish.margin_ms + ' ms' : '—'}</div><div class="l">Closest finish${s.closest_finish ? ' · ' + esc(s.closest_finish.winner.name) : ''}</div></div>
+      <div class="stat"><div class="v">${s.heats_remaining}</div><div class="l">Heats left${s.eta_min != null ? ` · ~${Math.round(s.eta_min)} min` : ''}</div></div>
+    </div>
+    <div class="card"><h2>Lane averages</h2>${lanes.map((l) => `<div style="margin:8px 0"><div style="display:flex;justify-content:space-between"><span>Lane ${l.lane}</span><span class="num">${fmt(l.average)} <small class="muted">(${l.runs})</small></span></div>
+      <div class="bar"><i style="width:${hi > lo ? 30 + 70 * (hi - l.average) / (hi - lo) : 100}%"></i></div></div>`).join('')}
+      <small class="muted">Every car races every lane, so lane differences cancel out in the standings.</small></div>
+    <div class="card"><h2>Fastest in each den</h2><table>${Object.entries(s.fastest_by_den).map(([d, r]) => `<tr><td>${esc(d)}</td><td>${esc(r.name)}</td><td class="num">${fmt(r.time)}</td></tr>`).join('')}</table></div>
+    ${s.cadence_s ? `<div class="card muted">Running a heat every ${s.cadence_s} s on average.</div>` : ''}`;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gravity Gate Display</title>
+<link rel="stylesheet" href="/static/common.css">
+<style>
+  body { overflow: hidden; height: 100vh; font-size: 1.6vw;
+    background: radial-gradient(ellipse at top, #1a2a6c 0%, var(--bg) 60%); }
+  .stage { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; padding: 2vh 3vw; gap: 2vh; }
+  .stage main { min-height: 0; }
+  header { display: flex; align-items: center; justify-content: space-between; }
+  header .event { font-size: 1.2em; color: var(--muted); }
+  header .title { font-size: 2.2em; font-weight: 800; color: var(--gold); letter-spacing: .02em; }
+  header .progress { font-size: 1em; color: var(--muted); text-align: right; }
+  .hdr-right { display: flex; align-items: center; gap: 1.2vw; }
+  .mini-qr { display: flex; align-items: center; gap: .6vw; font-size: .65em; color: var(--muted); text-align: right; line-height: 1.2; }
+  .mini-qr img { height: 10vh; width: 10vh; border-radius: .5vw; background: #fff; padding: .3vh; }
+  .lanes { display: grid; gap: 1.6vh; align-content: center; }
+  .lane { display: grid; grid-template-columns: 5em 1fr 7em 9em; align-items: center; gap: 1.5vw;
+    background: linear-gradient(90deg, var(--panel-2), var(--panel)); border: 2px solid var(--line);
+    border-radius: 1.2vw; padding: 1.6vh 2vw; transition: border-color .3s, transform .3s; }
+  .lane .ln { font-size: .8em; color: var(--muted); text-transform: uppercase; }
+  .lane .ln b { display: block; font-size: 2.4em; color: var(--text); line-height: 1; }
+  .lane .who { font-size: 2.3em; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lane .who small { display: block; font-size: .45em; color: var(--muted); font-weight: 500; }
+  .lane .place { font-size: 2.6em; font-weight: 900; text-align: center; }
+  .lane .time { font-size: 2.6em; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+  .lane.p1 { border-color: var(--p1); transform: scale(1.02); box-shadow: 0 0 3vw rgba(255, 210, 63, .25); }
+  .lane.reveal .place, .lane.reveal .time { animation: pop .5s ease-out both; }
+  @keyframes pop { from { opacity: 0; transform: translateY(1vh) scale(.8); } to { opacity: 1; transform: none; } }
+  .ondeck { background: rgba(0, 0, 0, .35); border-radius: 1vw; padding: 1vh 2vw; }
+  .ondeck h3 { margin: 0 0 .5vh; color: var(--gold); font-size: .9em; text-transform: uppercase; letter-spacing: .1em; }
+  .ondeck td, .ondeck th { border: 0; padding: .3vh .6vw; font-size: .95em; }
+  .ondeck th { font-size: .7em; }
+  .status { position: fixed; bottom: 1vh; right: 1.5vw; font-size: .7em; color: var(--muted); }
+  .armed { color: var(--green); }
+  #photo { position: fixed; inset: 6vh 6vw; background: rgba(5, 8, 18, .96); border: 3px solid var(--gold);
+    border-radius: 1.5vw; padding: 2vh 2vw; display: grid; grid-template-rows: auto 1fr auto; gap: 1.5vh; z-index: 5; }
+  #photo h2 { margin: 0; color: var(--gold); font-size: 2.2em; text-align: center; }
+  #photo img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; min-height: 0; }
+  #photo .imgs { display: grid; grid-template-rows: 2fr 1fr; gap: 1vh; min-height: 0; }
+  .grid-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(22vw, 1fr)); gap: 1.5vw; align-content: start; overflow: hidden; }
+  .grid-cols .card h3 { margin: 0 0 1vh; color: var(--gold); }
+  .grid-cols td { font-size: .85em; padding: .4vh .4vw; }
+  .awards { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2vh; }
+  .award { text-align: center; animation: pop .7s ease-out both; }
+  .award .cat { color: var(--muted); font-size: 1.4em; text-transform: uppercase; letter-spacing: .15em; }
+  .award .pl { font-size: 4em; font-weight: 900; }
+  .award .nm { font-size: 4.5em; font-weight: 800; }
+  .award .meta { font-size: 1.4em; color: var(--muted); }
+  .idle { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .idle h1 { font-size: 4.5em; margin: 0; color: var(--gold); }
+  .idle p { font-size: 1.6em; color: var(--muted); margin: .5vh 0; }
+  .qrs { display: flex; gap: 4vw; margin-top: 3vh; align-items: flex-start; }
+  .qrs figure { margin: 0; text-align: center; }
+  .qrs img { width: 30vh; height: 30vh; background: #fff; border-radius: 1.2vw; padding: 1.2vh; }
+  .qrs figcaption { font-size: 1.3em; margin-top: 1vh; }
+  .qrs .step { color: var(--gold); font-weight: 800; }
+  .bracket { overflow: hidden; min-height: 0; height: 100%; }
+  #soundgate { position: fixed; inset: 0; background: rgba(0, 0, 0, .7); display: flex; align-items: center;
+    justify-content: center; font-size: 2em; z-index: 10; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="soundgate">Click anywhere to start the display (enables sound)</div>
+<div class="stage">
+  <header>
+    <div><div class="event" id="event"></div><div class="title" id="title"></div></div>
+    <div class="hdr-right"><div class="progress" id="progress"></div>
+      <div class="mini-qr" id="miniqr"><span>Live results<br>on your phone</span><img src="/api/qr.svg" alt="QR code for live results"></div></div>
+  </header>
+  <main id="main"></main>
+  <footer id="footer"></footer>
+</div>
+<div id="photo" class="hidden"></div>
+<div class="status" id="status"></div>
+<script src="/static/common.js"></script>
+<script src="/static/bracket.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const { esc, fmt, ord, heatTitle } = Derby;
+let lastHeatKey = '', photoTimer = null, cache = { standings: null, awards: null, bracket: null };
+let join = { spectator_url: location.host + '/s', wifi_ssid: '' };
+const shortUrl = () => join.spectator_url.replace(/^https?:\/\//, '');
+
+document.getElementById('soundgate').onclick = (e) => { e.currentTarget.remove(); Derby.beep('staged'); document.documentElement.requestFullscreen?.().catch(() => {}); };
+
+async function loadJoin() {
+  try { join = await Derby.api('/api/join-info'); } catch (e) { /* keep default */ }
+  if (Derby.state) render(Derby.state);
+}
+loadJoin();
+setInterval(loadJoin, 60000);
+
+Derby.on(async (msg, st) => {
+  if (msg.type === 'sound' && st && st.sound) Derby.beep(msg.sound);
+  if (msg.type === 'photo' && msg.photo.close) showPhoto(msg.photo);  // every heat is captured; only close ones pop up
+  if (msg.type === 'state') {
+    if (['standings', 'awards', 'bracket'].includes(st.display_mode)) await refresh(st.display_mode);
+    render(st);
+  }
+});
+Derby.connect();
+
+async function refresh(mode) {
+  try { cache[mode] = await Derby.api('/api/' + mode); } catch (e) { /* keep last */ }
+}
+
+function render(st) {
+  const mode = st.display_mode;
+  $('event').textContent = st.event_name + (st.session ? ' — ' + st.session.name : '');
+  const c = st.heat_counts || {};
+  $('progress').innerHTML = st.session ? `Heat ${(c.done || 0) + (st.state === 'staged' ? 1 : 0)} of ${(c.done || 0) + (c.pending || 0)}` : '';
+  const t = st.timer || {};
+  $('status').innerHTML = `${st.state === 'staged' ? '<span class="armed">● ARMED</span>' : st.state.toUpperCase()} · timer ${t.connected ? 'connected' : 'offline'} · ${esc(shortUrl())}`;
+  $('miniqr').classList.toggle('hidden', mode === 'idle' || mode === 'awards');
+  if (mode !== 'race') $('photo').classList.add('hidden');
+  ({ race: renderRace, standings: renderStandings, awards: renderAwards, bracket: renderBracket, idle: renderIdle }[mode] || renderRace)(st);
+}
+
+function renderRace(st) {
+  const h = st.current;
+  $('title').textContent = h ? heatTitle(h) : (st.session ? 'Waiting for next race' : 'No race selected');
+  if (!h) { $('main').innerHTML = ''; } else {
+    const key = `${h.heat_id}:${h.lanes.map((l) => l.time).join(',')}`;
+    const reveal = key !== lastHeatKey && h.lanes.some((l) => l.time != null || l.place != null);
+    lastHeatKey = key;
+    // Like the old display: finish order once results are in, lane order while staged.
+    const lanes = h.lanes.some((l) => l.place) ? [...h.lanes].sort((a, b) => (a.place || 99) - (b.place || 99)) : h.lanes;
+    $('main').className = 'lanes';
+    $('main').innerHTML = lanes.map((l, i) => `
+      <div class="lane ${l.place === 1 ? 'p1' : ''} ${reveal ? 'reveal' : ''}" style="animation-delay:${i * 0.15}s">
+        <div class="ln">Lane<b>${l.lane}</b></div>
+        <div class="who">${esc(l.name)}<small>Car #${esc(l.car_number)} · ${esc(l.den)}</small></div>
+        <div class="place place-${l.place}">${l.dnf ? 'DNF' : ord(l.place)}</div>
+        <div class="time">${l.time != null ? fmt(l.time) : ''}</div>
+      </div>`).join('');
+  }
+  const deck = st.on_deck || [];
+  const lanesHdr = st.lanes.map((l) => `<th>Lane ${l}</th>`).join('');
+  $('footer').innerHTML = deck.length ? `<div class="ondeck"><h3>On deck</h3><table>
+    <tr><th>Round</th><th>Race</th>${lanesHdr}</tr>
+    ${deck.slice(0, 3).map((d) => `<tr><td>${d.bracket ? esc(d.bracket) + ' · ' : ''}${d.round}</td><td>${d.race}</td>
+      ${st.lanes.map((ln) => { const x = d.lanes.find((y) => y.lane === ln); return `<td>${x ? `${esc(x.car_number)} ${esc(x.name)}` : ''}</td>`; }).join('')}</tr>`).join('')}
+  </table></div>` : '';
+  if (st.photo && st.photo.close && h && st.photo.heat_id === h.heat_id && $('photo').classList.contains('hidden') && !photoTimer) showPhoto(st.photo);
+}
+
+function showPhoto(p) {
+  if (!p || !p.images) return;
+  $('photo').innerHTML = `<h2>📸 Photo finish — ${p.margin_ms != null ? p.margin_ms.toFixed(1) + ' ms' : ''}</h2>
+    <div class="imgs"><img src="${p.images.still}?${p.attempt}" alt="Finish line still"><img src="${p.images.strip}?${p.attempt}" alt="Slit-scan strip"></div>
+    <div class="muted" style="text-align:center">Top: finish line at the leader's crossing · Bottom: slit-scan, time runs left → right</div>`;
+  $('photo').classList.remove('hidden');
+  clearTimeout(photoTimer);
+  photoTimer = setTimeout(() => { $('photo').classList.add('hidden'); photoTimer = null; }, 12000);
+}
+
+function renderStandings(st) {
+  $('title').textContent = 'Standings';
+  $('footer').innerHTML = '';
+  const s = cache.standings;
+  if (!s) return;
+  $('main').className = 'grid-cols';
+  const metric = s.method === 'points' ? 'points' : (s.kind === 'elimination' ? 'losses' : 'average');
+  const table = (rows) => `<table>${rows.slice(0, 10).map((r) => `<tr><td class="place-${r.rank}">${r.rank}${r.tied ? '=' : ''}</td>
+      <td>#${esc(r.car_number)}</td><td>${esc(r.name)}</td><td class="num">${metric === 'average' ? fmt(r.average) : esc(r[metric])}</td></tr>`).join('')}</table>`;
+  $('main').innerHTML = Object.entries(s.dens).map(([den, rows]) => `<div class="card"><h3>${esc(den || 'Unassigned')}</h3>${table(rows)}</div>`).join('')
+    + `<div class="card"><h3>Pack overall</h3>${table(s.overall)}</div>`;
+}
+
+function renderAwards(st) {
+  $('title').textContent = 'Awards';
+  $('footer').innerHTML = '';
+  const list = cache.awards || [];
+  const n = st.awards_revealed;
+  $('main').className = 'awards';
+  if (!n) { $('main').innerHTML = '<div class="award"><div class="nm">🏆</div><div class="meta">Awards ceremony</div></div>'; return; }
+  const a = list[Math.min(n, list.length) - 1];
+  if (!a) return;
+  $('main').innerHTML = `<div class="award" key="${n}"><div class="cat">${esc(a.category)}</div>
+    <div class="pl place-${a.place}">${ord(a.place)} place${a.tied ? ' (tie)' : ''}</div>
+    <div class="nm">${esc(a.name)}</div>
+    <div class="meta">Car #${esc(a.car_number)} · ${esc(a.den)}${a.average ? ' · avg ' + fmt(a.average) : ''}</div></div>`;
+}
+
+function renderBracket(st) {
+  $('title').textContent = (st.session && st.session.kind === 'elimination') ? st.session.name : 'Bracket';
+  $('footer').innerHTML = '';
+  $('main').className = 'bracket';
+  BracketLines.render($('main'), cache.bracket, { fit: true });
+}
+
+function renderIdle(st) {
+  $('title').textContent = '';
+  $('footer').innerHTML = '';
+  $('main').className = 'idle';
+  const wifi = join.wifi_ssid ? `<figure><img src="/api/qr.svg?target=wifi" alt="Join Wi-Fi QR code">
+      <figcaption><span class="step">1</span> Join Wi-Fi<br><b>${esc(join.wifi_ssid)}</b></figcaption></figure>` : '';
+  $('main').innerHTML = `<h1>${esc(st.event_name)}</h1><p>Scan to follow every race live on your phone</p>
+    <div class="qrs">${wifi}<figure><img src="/api/qr.svg" alt="Live results QR code">
+      <figcaption>${wifi ? '<span class="step">2</span> ' : ''}Open live results<br><b>${esc(shortUrl())}</b></figcaption></figure></div>`;
+}
+</script>
+</body>
+</html>

@@ -255,6 +255,9 @@ and full API flows using the simulator.
 See [`docs/PLAN.md`](docs/PLAN.md) for the full design notes.
 
 ## License
-MIT. See [LICENSE](LICENSE).
+Licensed under the [Apache License 2.0](LICENSE). You're free to use, modify and redistribute Gravity Gate,
+including in your own projects, with no obligation to send changes back. If you redistribute it or
+build on it, keep the [NOTICE](NOTICE) file (which credits Matt Koch as the original author) and mark
+any files you changed.
 
 *Pinewood Derby is a registered trademark of Scouting America. Gravity Gate is an independent project and is not affiliated with or endorsed by Scouting America or any timer manufacturer.*

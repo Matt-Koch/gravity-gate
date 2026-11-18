@@ -54,8 +54,11 @@ class Node:
         self.outbox.append(msg)
         self.wake.set()
 
-    def _calibration(self):
-        from .photofinish.analysis import CameraCalibration
+    def _calibration(self, saved: dict | None = None):
+        from .photofinish.analysis import CameraCalibration, calibration_from_dict
+        if saved:  # set in race control (Settings -> Photo finish -> Camera check)
+            return calibration_from_dict(saved, self.camera.width, self.camera.height,
+                                         range(1, self.lane_count + 1))
         if self.calibration_file and Path(self.calibration_file).exists():
             d = json.loads(Path(self.calibration_file).read_text())
             return CameraCalibration(d["finish_x"], {int(k): tuple(v) for k, v in d["lane_bands"].items()},
@@ -76,7 +79,7 @@ class Node:
             times = {int(k): v for k, v in msg["times"].items()}
             await asyncio.sleep(msg.get("post_roll_s", 0.3))  # let the last car clear the line
             ts, frames = self.camera.heat_frames()
-            pf = await asyncio.to_thread(make_photo_finish, frames, ts, self._calibration(), times,
+            pf = await asyncio.to_thread(make_photo_finish, frames, ts, self._calibration(msg.get("calibration")), times,
                                          f"Heat {msg['heat_id']}", msg.get("margin_ms"))
             images = {}
             for kind in ("still", "strip"):
@@ -86,6 +89,17 @@ class Node:
             self.send({"type": "photo", "heat_id": msg["heat_id"], "attempt": msg["attempt"],
                        "margin_ms": msg.get("margin_ms"), "images": images,
                        "camera_offsets_ms": pf["camera_offsets_ms"]})
+
+        elif cmd == "snapshot" and self.camera is not None:
+            from .photofinish.analysis import check_image
+            _, frames = self.camera.buffer.snapshot()
+            if not frames:
+                return
+            img = await asyncio.to_thread(check_image, frames[-1], self._calibration(msg.get("calibration")))
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=88)
+            self.send({"type": "snapshot", "image": base64.b64encode(buf.getvalue()).decode(),
+                       "width": img.width, "height": img.height})
 
     async def run(self) -> None:
         import websockets

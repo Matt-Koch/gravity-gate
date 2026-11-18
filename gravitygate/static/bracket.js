@@ -92,10 +92,16 @@ const BracketLines = (() => {
       c.style.transform = `scale(${s})`;
       c.style.transformOrigin = 'top left';
       el.style.height = `${L.height * s}px`;
-    } else if (opts.fit) {               // projector: fit both ways
-      const s = Math.min(1.6, el.clientWidth / L.width, el.clientHeight / L.height);
-      c.style.transform = `scale(${s})`;
+    } else if (opts.fit) {
+      // Projector: fit the height, but never shrink names below readable size to fit the
+      // width. A long bracket instead shows its newest rounds (and the Champion) on the right,
+      // with earlier rounds fading off the left edge.
+      const fitAll = Math.min(el.clientWidth / L.width, el.clientHeight / L.height);
+      const s = Math.min(1.6, el.clientHeight / L.height, Math.max(fitAll, 0.85));
+      const offset = Math.max(0, L.width * s - el.clientWidth);
+      c.style.transform = `translateX(${-offset}px) scale(${s})`;
       c.style.transformOrigin = 'top left';
+      el.classList.toggle('bl-clipped', offset > 0);
     } else {
       el.style.height = '';
     }
@@ -110,6 +116,9 @@ const BracketLines = (() => {
 
   const css = `
   .bl-canvas { position: relative; font-size: 13px; }
+  .bl-clipped { position: relative; }
+  .bl-clipped::before { content: "◀ earlier rounds"; position: absolute; left: 0; top: 0; bottom: 0; width: 140px; z-index: 2;
+    background: linear-gradient(90deg, var(--bg) 25%, transparent); color: var(--muted); font-size: 12px; padding-top: 4px; pointer-events: none; }
   .bl-svg { position: absolute; inset: 0; overflow: visible; }
   .bl-line { fill: none; stroke: var(--gold); stroke-width: 2.5; opacity: .85; }
   .bl-line.drop { stroke: var(--red); stroke-dasharray: 6 5; opacity: .7; }

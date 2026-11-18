@@ -212,7 +212,15 @@ class RaceController:
         return row["id"] if row else None
 
     async def skip_heat(self, heat_id: int) -> None:
-        self.db.set_heat_status(heat_id, "cancelled")
+        """'Skip heat': race it later. The heat moves to the end of the queue, keeping its
+        name (e.g. Round 1 · Race 9), so no car loses a run. In elimination the queue only
+        holds the current round, so it still runs before the next round is drawn."""
+        heat = self.db.heat(heat_id)
+        if heat is None or heat["status"] == "done":
+            return
+        row = self.db.one("SELECT COALESCE(MAX(seq), 0) + 1 AS s FROM heats WHERE session_id = ?",
+                          (heat["session_id"],))
+        self.db.execute("UPDATE heats SET seq = ?, status = 'pending' WHERE id = ?", (row["s"], heat_id))
         if heat_id == self.current_heat_id:
             self.current_heat_id = None
             self.state = "idle"

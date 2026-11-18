@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 470" width="1000" height="470" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <title>Where everything goes on the track</title>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#94a0c2"/>
+    </marker>
+    <style>
+      .h{fill:#ffd23f;font-weight:700;font-size:17px}
+      .t{fill:#eef2ff;font-size:14px}
+      .m{fill:#94a0c2;font-size:12.5px}
+      .box{fill:#131a2e;stroke:#2a3558;stroke-width:2}
+      .pi{fill:#1b2440;stroke:#ffd23f;stroke-width:2.5}
+      .wire{stroke:#94a0c2;stroke-width:2.5;fill:none}
+    </style>
+  </defs>
+  <rect width="1000" height="470" rx="18" fill="#0b1020"/>
+  <text x="30" y="40" class="h" font-size="20">Track setup (side view)</text>
+
+  <!-- track: start high left, slope, flat run to finish -->
+  <path d="M60 130 L330 300 L930 330" stroke="#c9d3e6" stroke-width="10" fill="none" stroke-linecap="round"/>
+  <path d="M930 330 V372" stroke="#c9d3e6" stroke-width="6"/>
+  <path d="M60 130 V372 M330 300 V372" stroke="#2a3558" stroke-width="5"/>
+  <text x="400" y="350" class="m">track</text>
+
+  <!-- start gate -->
+  <rect x="70" y="100" width="34" height="22" rx="4" fill="#3d6bff"/>
+  <text x="112" y="104" class="t" font-weight="600">Start gate</text>
+  <text x="112" y="121" class="m">its switch is wired to the timer</text>
+
+  <!-- car -->
+  <rect x="610" y="296" width="54" height="16" rx="5" fill="#ffd23f" transform="rotate(2.9 637 304)"/>
+  <circle cx="618" cy="315" r="5" fill="#eef2ff"/><circle cx="656" cy="317" r="5" fill="#eef2ff"/>
+
+  <!-- gantry -->
+  <path d="M790 210 V323 M836 212 V326" stroke="#e09a5b" stroke-width="6"/>
+  <path d="M784 210 H842" stroke="#e09a5b" stroke-width="8"/>
+  <text x="852" y="226" class="t" font-weight="600">Timer gantry</text>
+  <text x="852" y="243" class="m">= the finish line</text>
+
+  <!-- camera -->
+  <path d="M812 96 V150" stroke="#94a0c2" stroke-width="4"/>
+  <rect x="796" y="150" width="34" height="22" rx="4" fill="#2fd18b"/>
+  <path d="M813 172 L760 318 L866 324 Z" fill="#2fd18b" fill-opacity=".12" stroke="#2fd18b" stroke-dasharray="5 5"/>
+  <text x="520" y="150" class="t" font-weight="600">Pi camera, looking straight down</text>
+  <text x="520" y="168" class="m">30–60 cm above the track, finish line</text>
+  <text x="520" y="184" class="m">across the middle of the picture</text>
+  <path d="M742 162 C 760 160, 775 160, 794 161" class="wire" marker-end="url(#a)"/>
+
+  <!-- finish box -->
+  <rect x="660" y="392" width="300" height="56" rx="12" class="pi"/>
+  <text x="678" y="416" class="h" font-size="15">FINISH-LINE BOX</text>
+  <text x="678" y="436" class="m">USB-serial to the gantry · camera ribbon</text>
+  <path d="M813 323 C 818 360, 815 372, 815 392" class="wire"/>
+  <path d="M831 165 C 985 190, 985 380, 960 405" class="wire"/>
+
+  <!-- brain at the top -->
+  <rect x="40" y="392" width="320" height="56" rx="12" class="pi"/>
+  <text x="58" y="416" class="h" font-size="15">BRAIN</text>
+  <text x="58" y="436" class="m">at the race director's table, HDMI to projector</text>
+  <path d="M360 420 H660" stroke="#3d6bff" stroke-width="3"/>
+  <text x="402" y="412" class="m">Ethernet (or Wi-Fi) between the boxes</text>
+</svg>

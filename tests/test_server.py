@@ -1,3 +1,4 @@
+import json
 import time
 
 import pytest
@@ -195,3 +196,62 @@ def test_qualifier_spec_three_lanes_two_runs_drop_first_and_last(client):
     assert top["points"] == max(r["points"] for r in pts["overall"])
     assert all(r["points"] <= 6 * 3 for r in pts["overall"])
     assert client.post("/api/settings", json={"standings_method": "bogus"}).status_code == 400
+
+
+def test_camera_check_and_calibration(client):
+    assert client.post("/api/camera/snapshot").status_code == 409        # no camera anywhere yet
+    client.post("/api/settings", json={"camera_kind": "synthetic"})
+    time.sleep(0.4)                                                       # let the ring buffer fill
+    r = client.post("/api/camera/snapshot").json()
+    snap = r["snapshot"]
+    assert r["sources"] == 1 and snap["width"] == 640 and snap["height"] == 200
+    assert client.get(snap["url"]).headers["content-type"] == "image/jpeg"
+    assert client.get("/api/camera/snapshot").json()["url"] == snap["url"]
+    bad = client.post("/api/camera/calibration", json={"finish_x": 300, "edges": [0, 100]})
+    assert bad.status_code == 400                                         # 3 lanes need 4 edges
+    cal = client.post("/api/camera/calibration", json={"finish_x": 300, "edges": [190, 10, 70, 130],
+                                                       "lane1_at_top": False}).json()["calibration"]
+    assert cal["lane_bands"] == {"3": [10, 70], "2": [70, 130], "1": [130, 190]}
+    assert client.get("/api/settings").json()["camera_calibration"]["finish_x"] == 300
+    client.post("/api/camera/calibration", json={"reset": True})
+    assert client.get("/api/settings").json()["camera_calibration"] is None
+
+
+def test_camera_check_through_finish_line_node(client):
+    import base64, io
+    from PIL import Image
+    with client.websocket_connect("/ws/node") as node:
+        node.send_text(json.dumps({"type": "hello", "info": {"camera": "pi"}}))
+        time.sleep(0.3)
+        client.post("/api/camera/calibration", json={"finish_x": 222, "edges": [0, 60, 120, 180]})
+        assert client.post("/api/camera/snapshot").json()["sources"] == 1
+        cmd = node.receive_json()
+        assert cmd["cmd"] == "snapshot" and cmd["calibration"]["finish_x"] == 222
+        buf = io.BytesIO()
+        Image.new("RGB", (640, 200)).save(buf, format="JPEG")
+        node.send_text(json.dumps({"type": "snapshot", "image": base64.b64encode(buf.getvalue()).decode(),
+                                   "width": 640, "height": 200}))
+        snap = wait_for(lambda: client.get("/api/camera/snapshot").json().get("url"))
+        assert client.get(snap).status_code == 200
+
+
+def test_skip_heat_races_it_later(client):
+    client.post("/api/roster/import", json={"csv": ROSTER})
+    ids = [r["id"] for r in client.get("/api/racers").json()]
+    s = client.post("/api/sessions", json={"kind": "chart", "racer_ids": ids, "format": "rotation",
+                                           "runs_per_lane": 1}).json()
+    first = client.post("/api/race/next").json()["heat_id"]
+    client.post("/api/race/skip", json={"heat_id": first})
+    assert client.get("/api/state").json()["state"] == "idle"
+    heats = client.get(f"/api/sessions/{s['id']}/heats").json()
+    assert heats[-1]["heat_id"] == first and heats[-1]["status"] == "pending"   # now last in the queue
+    assert client.post("/api/race/next").json()["heat_id"] != first
+    raced = 0
+    while True:
+        client.post("/api/race/simulate")
+        wait_for(lambda: client.get("/api/state").json()["state"] == "results")
+        raced += 1
+        if client.post("/api/race/next").json()["heat_id"] is None:
+            break
+    assert raced == s["heats"]                                      # nothing was lost
+    assert all(r["runs"] == 3 for r in client.get("/api/standings").json()["overall"])

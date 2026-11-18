@@ -136,3 +136,39 @@ def make_photo_finish(frames: Sequence[np.ndarray], timestamps: Sequence[float],
         "camera_offsets_ms": frame_time_offsets(crossings, timestamps),
         "frame_index": idx,
     }
+
+
+def calibration_from_dict(d: dict | None, width: int, height: int, lanes) -> CameraCalibration:
+    """Saved setting -> CameraCalibration; falls back to the default layout."""
+    if not d:
+        return CameraCalibration.default(width, height, list(lanes))
+    return CameraCalibration(finish_x=int(d["finish_x"]),
+                             lane_bands={int(k): (int(v[0]), int(v[1])) for k, v in d["lane_bands"].items()},
+                             threshold=float(d.get("threshold", 28.0)), flip_time=bool(d.get("flip_time", False)))
+
+
+def calibration_to_dict(cal: CameraCalibration) -> dict:
+    return {"finish_x": cal.finish_x, "lane_bands": {str(k): list(v) for k, v in cal.lane_bands.items()},
+            "threshold": cal.threshold, "flip_time": cal.flip_time}
+
+
+def check_image(frame: np.ndarray, cal: CameraCalibration):
+    """Camera check: the live view with the finish line, lane bands and a pixel ruler drawn on,
+    so the calibration can be lined up with the real track."""
+    from PIL import Image, ImageDraw
+
+    img = Image.fromarray(frame).convert("RGB")
+    d = ImageDraw.Draw(img)
+    w, h = img.size
+    for x in range(0, w, 50):                       # ruler along the top, labelled every 100 px
+        d.line([(x, 0), (x, 6 if x % 100 else 12)], fill=(255, 255, 255), width=1)
+        if x % 100 == 0:
+            d.text((x + 2, 12), str(x), fill=(255, 255, 255))
+    for lane, (y0, y1) in sorted(cal.lane_bands.items()):
+        d.rectangle([0, y0, w - 1, y1 - 1], outline=(60, 200, 255), width=2)
+        d.rectangle([4, y1 - 20, 64, y1 - 4], fill=(0, 0, 0))   # bottom-left: clear of the ruler
+        d.text((8, y1 - 18), f"Lane {lane}", fill=(60, 200, 255))
+    d.line([(cal.finish_x, 0), (cal.finish_x, h)], fill=(255, 40, 40), width=3)
+    d.rectangle([cal.finish_x + 4, h - 20, cal.finish_x + 118, h - 4], fill=(0, 0, 0))
+    d.text((cal.finish_x + 8, h - 18), f"finish x={cal.finish_x}", fill=(255, 80, 80))
+    return img

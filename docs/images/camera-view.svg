@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 400" width="1000" height="400" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <title>What the finish-line camera sees, and the calibration numbers</title>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#eef2ff"/>
+    </marker>
+    <style>
+      .h{fill:#ffd23f;font-weight:700;font-size:17px}
+      .t{fill:#eef2ff;font-size:14px}
+      .m{fill:#94a0c2;font-size:12.5px}
+      .num{fill:#3cc8ff;font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace}
+    </style>
+  </defs>
+  <rect width="1000" height="400" rx="18" fill="#0b1020"/>
+  <text x="30" y="40" class="h" font-size="20">The camera's picture (from above) and what to enter</text>
+
+  <!-- camera frame 640x200 drawn at 1:1 -->
+  <g transform="translate(60 80)">
+    <rect width="640" height="200" fill="#464646"/>
+    <rect y="0" width="640" height="66" fill="#4c4c4c"/><rect y="133" width="640" height="67" fill="#4c4c4c"/>
+    <path d="M0 66 H640 M0 133 H640" stroke="#3cc8ff" stroke-width="2"/>
+    <rect width="640" height="200" fill="none" stroke="#3cc8ff" stroke-width="2"/>
+    <!-- cars -->
+    <rect x="200" y="14" width="140" height="38" rx="6" fill="#d4c86c"/>
+    <rect x="180" y="81" width="140" height="38" rx="6" fill="#8fa88c"/>
+    <rect x="232" y="147" width="140" height="38" rx="6" fill="#4878a8"/>
+    <path d="M40 100 H140" stroke="#eef2ff" stroke-width="2.5" marker-end="url(#a)"/>
+    <text x="40" y="92" class="t" font-size="12">cars travel</text>
+    <!-- finish line -->
+    <path d="M400 0 V200" stroke="#ff4040" stroke-width="3"/>
+    <text x="8" y="60" class="num">Lane 1</text><text x="8" y="126" class="num">Lane 2</text><text x="8" y="193" class="num">Lane 3</text>
+  </g>
+  <!-- annotations -->
+  <text x="460" y="70" fill="#ff6060" font-size="13" font-family="ui-monospace,Menlo,Consolas,monospace" text-anchor="middle">finish line x = 400</text>
+  <g class="num">
+    <text x="708" y="85">y = 0</text><text x="708" y="150">y = 66</text><text x="708" y="217">y = 133</text><text x="708" y="284">y = 200</text>
+  </g>
+  <text x="60" y="310" class="m">0 px</text><text x="700" y="310" class="m" text-anchor="end">640 px (camera picture width)</text>
+
+  <!-- what to type -->
+  <rect x="785" y="80" width="200" height="230" rx="12" fill="#131a2e" stroke="#2a3558" stroke-width="2"/>
+  <text x="801" y="106" class="t" font-weight="600">Settings → Photo finish</text>
+  <text x="801" y="136" class="m">Finish line x</text>
+  <text x="801" y="156" fill="#ff6060" font-size="15" font-family="ui-monospace,Menlo,Consolas,monospace">400</text>
+  <text x="801" y="186" class="m">Lane edges y (top → bottom)</text>
+  <text x="801" y="206" class="num" font-size="15">0, 66, 133, 200</text>
+  <text x="801" y="236" class="m">Lane at the top</text>
+  <text x="801" y="256" class="t">Lane 1</text>
+  <text x="801" y="290" class="m">then Save calibration</text>
+
+  <text x="30" y="350" class="t">Mount the camera so the cars cross the picture left → right and the lanes are horizontal stripes.</text>
+  <text x="30" y="372" class="m">The ruler on the camera check photo shows the pixel numbers; the defaults (line in the middle, equal lanes) are a fine start.</text>
+</svg>

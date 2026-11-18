@@ -6,6 +6,10 @@ bracket-line view, serial gantry timer support, finish-line photos for every hea
 site that families open by scanning a QR code.
 
 <p align="center">
+  <b><a href="docs/SETUP.md">📘 Setup manual</a></b> &nbsp;·&nbsp; <b><a href="docs/RACE-DAY.md">🏁 Race-day card</a></b> &nbsp;·&nbsp; <a href="#quick-start">Try it in 2 minutes</a>
+</p>
+
+<p align="center">
   <img src="docs/screenshots/display-race.png" width="64%" alt="Projector display showing a finished heat with places and times">
   <img src="docs/screenshots/phone-now.png" width="22%" alt="Phone companion view showing the current heat">
 </p>
@@ -76,6 +80,7 @@ The typical day is **round-robin qualifiers → per-den standings and awards →
   - the **still** at the leader's crossing, with lanes, times, and places drawn on;
   - a **slit-scan strip**: the finish-line pixel column over time, which is how real photo-finish cameras work.
 - Frames from before the timer was armed are ignored, and a short post-roll makes sure the last car is in the shot.
+- **Camera check** in Settings shows the live view with the finish line, lane boxes and a pixel ruler drawn on, so you can line the calibration up with the real track.
 
 <p align="center">
   <img src="docs/screenshots/display-photo-finish.png" width="64%" alt="Projector photo finish overlay showing a 1.5 ms margin">
@@ -130,7 +135,7 @@ The typical day is **round-robin qualifiers → per-den standings and awards →
 <p align="center"><img src="docs/screenshots/admin-fleet.png" width="80%" alt="Fleet tab in race control after auto-arrange"></p>
 
 ### 🧰 Race control
-- One screen for the race director: Go to Next Race, Rerun Last Race, Manual Entry, Force Results, Skip Heat, display modes, Sound On/Off, timer status, and the raw timer feed.
+- One screen for the race director: Go to Next Race, Rerun Last Race, Manual Entry, Force Results, Skip Heat (it moves to the end of the queue, so no car loses a run), display modes, Sound On/Off, timer status, and the raw timer feed.
 - Check-in and inspection checkboxes, quick-add racers, den editing.
 - Session management for chart races and elimination brackets, with heat lists and late-arrival make-ups.
 - Optional **admin PIN**; spectator pages are always read-only.
@@ -143,24 +148,17 @@ The typical day is **round-robin qualifiers → per-den standings and awards →
 
 ## Hardware
 
-```
-                 ┌──────────── TOP OF TRACK ────────────┐
- Start gate ───► │ Hub Pi  (gravitygate serve)          │──HDMI──► Projector  (/display)
-                 │  • database, web server, Wi-Fi AP    │◄─ Wi-Fi ─ phones (/s), laptop (/admin)
-                 └────────────────▲─────────────────────┘
-                                  │ WebSocket (Ethernet or Wi-Fi)
-                 ┌────────────────┴─────────────────────┐
- Timer gantry ──►│ Node Pi (gravitygate node)           │
- Pi camera ─────►│  • serial timer + finish-line camera │
-                 └──────────── BOTTOM OF TRACK ─────────┘
-```
+<p align="center"><img src="docs/images/system-overview.svg" width="90%" alt="Diagram: brain with projector, finish-line box with timer gantry and Pi camera, display boxes with TVs, all on one network with families' phones on Wi-Fi"></p>
 
-| Setup | You need |
-|---|---|
-| **Single Pi** | Raspberry Pi 4/5 (2 GB+), USB-serial adapter for your timer, HDMI to the projector |
-| **Two Pi** (recommended with a camera) | A second Pi at the finish line with the timer and a Pi camera (Camera Module 3, or the Global Shutter Camera for the sharpest finishes) |
+| Role | Job | Typical hardware |
+|---|---|---|
+| **Brain** (one) | Race control, database, phone site, QR codes; usually drives the projector | Raspberry Pi 5/4 (4 GB) or a Protectli / mini PC |
+| **Finish line** (one) | Reads the gantry timer over USB-serial; photographs every finish | Raspberry Pi 4/5 + Pi Camera Module 3 (or Global Shutter) |
+| **Display** (any) | Full-screen race screen on a TV | Any Pi 4/5 or mini PC with HDMI |
 
-The node queues results while the hub is unreachable, so a Wi-Fi blip never loses a heat.
+A single box can do everything, or 3–4 boxes split the work. Every box runs the same image and gets its
+role on the day. The finish-line box queues results if the network blips, so no heat is ever lost.
+See the [setup manual](docs/SETUP.md#part-1--what-you-need) for the full shopping list and network options.
 
 ## Quick start
 
@@ -178,43 +176,23 @@ Open <http://localhost:8000/admin>. Under **Sessions**, create a qualifier race,
 screen and <http://localhost:8000/s> on your phone. To see photo finishes without a camera, set
 *Settings → Photo finish → Camera = Synthetic*.
 
-### Raspberry Pi
+### Set up for a real event
+Follow the **[setup manual](docs/SETUP.md)**: it walks through imaging, booting, assigning roles,
+connecting the timer and camera, Google Sheets, a rehearsal and race day, with pictures. The short version:
+
 ```bash
-# Hub (top of track, or a single Pi)
-./deploy/install.sh hub
-sudo ./deploy/setup-hotspot.sh "Pack63-Derby" "a-good-password"   # optional: the Pi becomes the Wi-Fi
-
-# Node (bottom of track) — timer on /dev/ttyUSB0, Pi camera attached
-./deploy/install.sh node ws://<hub-hostname>.local:8000 /dev/ttyUSB0 microwizard pi
+# On each box (Raspberry Pi OS Lite 64-bit or Debian 12), or once and then clone the SD card:
+sudo apt install -y git
+sudo git clone https://github.com/Matt-Koch/gravity-gate.git /opt/gravity-gate
+sudo /opt/gravity-gate/deploy/install-fleet.sh "our-fleet-passphrase"
 ```
-Both install as systemd services that start on boot. Then, in **Admin → Settings**:
-1. **Timer**: pick the source (serial on this Pi / node Pi), port, and model. Run a test heat and check the raw output log.
-2. **Audience phones**: set the Wi-Fi name and password for the join QR, and set the public URL (e.g. `http://10.42.0.1:8000` with the hotspot).
-3. **Google Sheets**: paste the roster link, plus the Apps Script URL and secret for results sync.
-4. **Photo finish**: turn it on, set the close-finish margin, and calibrate the finish line.
 
-### Fleet: same image on every box (Pi or Protectli)
-```bash
-# On one box with Raspberry Pi OS Lite (Bookworm) or Debian 12, from a clone of this repo:
-sudo ./deploy/install-fleet.sh "our-fleet-passphrase"   # passphrase optional; same on every box
-sudo ./deploy/prepare-image.sh && sudo poweroff         # then clone the SD card / disk to the others
-```
-1. Boot every box with a monitor attached. Each shows its ID, IP and hardware.
-2. On the box that will run race control, press **B** (Brain). Its screen shows the race-control address.
-3. On the brain press **Enter** for the Fleet screen, then **A** to auto-arrange. Or select each ID and press **F**/**D**.
-   You can also press **F** or **D** on any box's own keyboard, or use **Admin → Fleet** from a laptop.
-4. Display boxes switch their HDMI to the race screen (Ctrl+Alt+F1 shows the role picker again).
-   The finish-line box starts reading the timer and camera.
+1. Boot every box with a monitor. Each shows its ID, IP and hardware.
+2. Press **B** on the box that will run race control. Its screen shows the race-control address.
+3. Assign the others by ID (brain console **Enter** → **A** auto-arrange, or **Admin → Fleet**), or press **F**/**D** on their own keyboards.
+4. Check the timer in the **Race** tab's raw log, and line up the camera with **Settings → Photo finish → Camera check**.
 
-Each box renames itself `gg-<id>.local`. Logs live in `/var/lib/gravitygate/logs/` and `journalctl -u gravitygate-agent`.
-
-### Verify your timer before race day
-```bash
-gravitygate timer-capture --serial /dev/ttyUSB0 --profile generic --lanes 3
-```
-Run a heat and confirm each line parses into the right lane times. The built-in profiles come from
-published manuals and community notes, so please open an issue with your timer's raw output if
-anything looks off.
+Prefer one computer for everything? See [Appendix A](docs/SETUP.md#a-one-computer-setup-no-fleet).
 
 ## Google Sheets setup (5 minutes)
 1. Open your roster spreadsheet → **Extensions → Apps Script**.
@@ -222,6 +200,8 @@ anything looks off.
 3. **Deploy → New deployment → Web app**, execute as *Me*, access *Anyone*.
 4. Paste the web app URL and secret into **Admin → Settings → Google Sheets**.
 5. **Racers → Pull from Google Sheets** imports the roster. Results push automatically after every heat.
+
+Step-by-step with screenshots: [setup manual, Part 6](docs/SETUP.md#part-6--roster-and-google-sheets).
 
 ## How qualifiers are scheduled
 
@@ -275,9 +255,12 @@ lane-rotated matchups; ties), timer parsing, reruns, the photo-finish pipeline, 
 full API flows using the simulator, and fleet mode (hardware detection against a fake `/sys`,
 signed beacons, auto-arrange, console keys, and a real UDP-discovery → WebSocket → role-process run).
 
+Documentation images are reproducible: `docs/tools/render_console.py` draws the HDMI console screens, and
+`docs/tools/take_screenshots.py` / `fleet_screenshot.py` drive a simulated event in a headless browser.
+
 ## Roadmap / backlog
 - [ ] **Dead-simple live streaming to YouTube or Facebook**: a one-click "Go live" that streams the projector display, with an optional track camera, to an RTMP stream key from the Pi.
-- [ ] Finish-line camera calibration page (drag the line and lane bands on a live preview)
+- [ ] Camera calibration by dragging the line and lane boxes on the live view (today: type the numbers in Camera check)
 - [ ] Start-gate GPIO on the hub with chrony time sync between Pis, for an absolute t₀
 - [ ] Printable reports: heat sheets, per-racer cards, certificates
 - [ ] Importer for existing DerbyMaster data files

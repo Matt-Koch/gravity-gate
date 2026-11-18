@@ -256,6 +256,18 @@ Every box gets the same image; roles are decided on the day.
   roles from hardware. Features follow hardware: timer_kind "auto" and
   photo_enabled "auto" resolve from what's online.
 
+## 13b. Docs and race-control refinements
+
+* `docs/SETUP.md` is the setup manual (hardware, imaging, roles, timer, camera,
+  Sheets, rehearsal, race day, troubleshooting); `docs/RACE-DAY.md` is a
+  printable operator card. Images are reproducible via `docs/tools/`.
+* Camera check: the brain asks the finish-line node (or its own camera) for a
+  live frame with the calibration drawn on; calibration is stored on the brain
+  and sent with every photo request, so it works in fleet mode.
+* Skip heat defers the heat to the end of the queue instead of cancelling it.
+* The projector bracket keeps names readable on long brackets by showing the
+  newest rounds and fading earlier ones off the left edge.
+
 ## 14. Backlog
 
 * Dead-simple live streaming to YouTube / Facebook (RTMP stream key, one

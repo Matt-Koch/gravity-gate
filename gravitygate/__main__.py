@@ -114,8 +114,11 @@ def _demo_roster(data: str, count: int) -> None:
     dens = ["Lions", "Tigers", "Wolves", "Bears", "Webelos", "AOL"]
     db = Database(Path(data) / "derby.sqlite3")
     rng = random.Random(63)
+    names = [(f, l) for f in firsts for l in lasts]
+    rng.shuffle(names)  # unique first/last pairs, so demo screenshots never show twins
     for i in range(count):
-        db.add_racer(rng.choice(firsts), rng.choice(lasts), dens[i % len(dens)], checked_in=True)
+        first, last = names[i % len(names)]
+        db.add_racer(first, last, dens[i % len(dens)], checked_in=True)
     print(f"added {count} racers to {data}/derby.sqlite3")
 
 

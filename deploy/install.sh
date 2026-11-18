@@ -2,6 +2,9 @@
 # Install Gravity Gate on Raspberry Pi OS (Bookworm or newer).
 #   ./deploy/install.sh hub                          # top-of-track / single Pi
 #   ./deploy/install.sh node ws://derby-top.local:8000 /dev/ttyUSB0 microwizard pi
+#
+# Most events should use fleet mode instead (deploy/install-fleet.sh): the same
+# image on every box, roles picked on the day. See docs/SETUP.md.
 set -euo pipefail
 ROLE="${1:-hub}"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"

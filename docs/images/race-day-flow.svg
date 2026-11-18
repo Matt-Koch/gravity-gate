@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 250" width="1000" height="250" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <title>A typical race day</title>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#94a0c2"/>
+    </marker>
+    <style>
+      .box{fill:#131a2e;stroke:#2a3558;stroke-width:2}
+      .key{fill:#1b2440;stroke:#ffd23f;stroke-width:2.5}
+      .h{fill:#ffd23f;font-weight:700;font-size:15px}
+      .t{fill:#eef2ff;font-size:13px}
+      .m{fill:#94a0c2;font-size:12px}
+      .ar{stroke:#94a0c2;stroke-width:2.5;fill:none}
+    </style>
+  </defs>
+  <rect width="1000" height="250" rx="18" fill="#0b1020"/>
+  <text x="30" y="38" class="h" font-size="19">A typical race day</text>
+  <g>
+    <rect x="25" y="65" width="165" height="130" rx="12" class="box"/>
+    <text x="107" y="92" class="h" text-anchor="middle">Check-in</text>
+    <text x="107" y="118" class="t" text-anchor="middle">roster from Sheets</text>
+    <text x="107" y="137" class="t" text-anchor="middle">weigh &amp; inspect</text>
+    <text x="107" y="166" class="m" text-anchor="middle">Racers tab</text>
+  </g>
+  <g>
+    <rect x="215" y="65" width="185" height="130" rx="12" class="key"/>
+    <text x="307" y="92" class="h" text-anchor="middle">Qualifiers</text>
+    <text x="307" y="118" class="t" text-anchor="middle">round robin, all dens mixed</text>
+    <text x="307" y="137" class="t" text-anchor="middle">3 lanes × 2 = 6 races/car</text>
+    <text x="307" y="166" class="m" text-anchor="middle">Sessions → New qualifier</text>
+  </g>
+  <g>
+    <rect x="425" y="65" width="165" height="130" rx="12" class="box"/>
+    <text x="507" y="92" class="h" text-anchor="middle">Den awards</text>
+    <text x="507" y="118" class="t" text-anchor="middle">standings per den</text>
+    <text x="507" y="137" class="t" text-anchor="middle">+ pack overall</text>
+    <text x="507" y="166" class="m" text-anchor="middle">Display: Awards</text>
+  </g>
+  <g>
+    <rect x="615" y="65" width="185" height="130" rx="12" class="key"/>
+    <text x="707" y="92" class="h" text-anchor="middle">Champions bracket</text>
+    <text x="707" y="118" class="t" text-anchor="middle">top N of each den</text>
+    <text x="707" y="137" class="t" text-anchor="middle">double elimination</text>
+    <text x="707" y="166" class="m" text-anchor="middle">Sessions → New bracket</text>
+  </g>
+  <g>
+    <rect x="825" y="65" width="150" height="130" rx="12" class="box"/>
+    <text x="900" y="92" class="h" text-anchor="middle">Champion 🏆</text>
+    <text x="900" y="118" class="t" text-anchor="middle">bracket awards</text>
+    <text x="900" y="137" class="t" text-anchor="middle">results in Sheets</text>
+    <text x="900" y="166" class="m" text-anchor="middle">automatic sync</text>
+  </g>
+  <path d="M190 130 H213" class="ar" marker-end="url(#a)"/>
+  <path d="M400 130 H423" class="ar" marker-end="url(#a)"/>
+  <path d="M590 130 H613" class="ar" marker-end="url(#a)"/>
+  <path d="M800 130 H823" class="ar" marker-end="url(#a)"/>
+  <text x="30" y="228" class="m">Phones follow along the whole time: live heats, “my Scout”, leaderboards, the bracket, and every finish photo.</text>
+</svg>

@@ -29,7 +29,7 @@
   .res { text-align: right; font-variant-numeric: tabular-nums; }
   .res b { display: block; font-size: 1.15rem; }
   .star { background: none; border: 0; padding: 0 6px; font-size: 1.2rem; color: var(--muted); }
-  .star.on { color: var(--gold); }
+  button.star.on { color: var(--gold); background: none; border: 0; }  /* beat the global button.on style */
   .mine { background: rgba(255, 210, 63, .08); border-radius: 8px; }
   .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-right: 6px; animation: blink 1.2s infinite; }
   @keyframes blink { 50% { opacity: .3; } }

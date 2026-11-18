@@ -103,6 +103,7 @@ class Hub:
         self.fleet.listeners.append(self._fleet_changed)
         self.controller.feature_probe = self.features
         self._fleet_tasks: list[asyncio.Task] = []
+        self.last_snapshot: dict | None = None
 
     # -- fleet & features ----------------------------------------------------
     def features(self) -> dict:
@@ -226,19 +227,14 @@ class Hub:
         self.camera.start()
 
     def calibration(self):
-        from .photofinish.analysis import CameraCalibration
-        saved = self.db.get_setting("camera_calibration")
-        if saved:
-            return CameraCalibration(finish_x=saved["finish_x"],
-                                     lane_bands={int(k): tuple(v) for k, v in saved["lane_bands"].items()},
-                                     threshold=saved.get("threshold", 28.0),
-                                     flip_time=saved.get("flip_time", False))
+        from .photofinish.analysis import calibration_from_dict
         cam = self.camera
-        return CameraCalibration.default(cam.width, cam.height, self.db.active_lanes())
+        return calibration_from_dict(self.db.get_setting("camera_calibration"), cam.width, cam.height,
+                                     self.db.active_lanes())
 
     async def request_photo(self, req: dict) -> None:
         if self.nodes:
-            self.send_nodes({"cmd": "photo", **req})
+            self.send_nodes({"cmd": "photo", **req, "calibration": self.db.get_setting("camera_calibration")})
         if self.camera is not None:
             from .photofinish.camera import capture_photo_finish
             # Post-roll: the timer reports the instant the last car crosses, so keep
@@ -252,6 +248,33 @@ class Hub:
             await self.controller.photo_ready(req["heat_id"], req["attempt"],
                                               {k: "/photos/" + Path(p).name for k, p in paths.items()},
                                               req["margin_ms"])
+
+    # -- camera check ----------------------------------------------------------
+    async def request_snapshot(self) -> int:
+        """Ask every camera (finish-line node and/or this machine) for a calibration view."""
+        saved = self.db.get_setting("camera_calibration")
+        sources = 0
+        if self.nodes:
+            self.send_nodes({"cmd": "snapshot", "calibration": saved})
+            sources += sum(1 for n in self.node_info.values() if n.get("camera") not in (None, "none"))
+        if self.camera is not None:
+            from .photofinish.analysis import check_image
+            _, frames = self.camera.buffer.snapshot()
+            if frames:
+                img = await asyncio.to_thread(check_image, frames[-1], self.calibration())
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=88)
+                await self.snapshot_ready(buf.getvalue(), img.width, img.height)
+                sources += 1
+        return sources
+
+    async def snapshot_ready(self, jpeg: bytes, width: int, height: int) -> None:
+        for old in self.photo_dir.glob("camera-check-*.jpg"):
+            old.unlink(missing_ok=True)
+        name = f"camera-check-{int(time.time() * 1000)}.jpg"
+        (self.photo_dir / name).write_bytes(jpeg)
+        self.last_snapshot = {"url": "/photos/" + name, "width": width, "height": height, "at": time.time()}
+        await self.controller.publish("snapshot", {"snapshot": self.last_snapshot})
 
     # -- websockets ----------------------------------------------------------
     async def broadcast(self, msg: dict) -> None:
@@ -608,6 +631,38 @@ def create_app(data_dir: str | Path = "data", port: int = 8000) -> FastAPI:
         finally:
             hub.clients.discard(ws)
 
+    # -- camera check ---------------------------------------------------------
+    @app.post("/api/camera/snapshot", dependencies=[Depends(admin)])
+    async def camera_snapshot():
+        n = await hub.request_snapshot()
+        if not n:
+            raise HTTPException(409, "no finish-line camera is online")
+        return {"sources": n, "snapshot": hub.last_snapshot}
+
+    @app.get("/api/camera/snapshot")
+    async def camera_snapshot_get():
+        return hub.last_snapshot or {}
+
+    @app.post("/api/camera/calibration", dependencies=[Depends(admin)])
+    async def camera_calibration(body: dict = Body(...)):
+        """{finish_x, edges: [y0, y1, ...] top to bottom, lane1_at_top, flip_time} or {"reset": true}."""
+        if body.get("reset"):
+            db.set_setting("camera_calibration", None)
+            return {"calibration": None}
+        try:
+            edges = sorted(int(e) for e in body["edges"])
+            lanes = db.active_lanes()
+            if len(edges) != len(lanes) + 1:
+                raise ValueError(f"need {len(lanes) + 1} lane edges for {len(lanes)} lanes")
+            order = lanes if body.get("lane1_at_top", True) else list(reversed(lanes))
+            cal = {"finish_x": int(body["finish_x"]),
+                   "lane_bands": {str(l): [edges[i], edges[i + 1]] for i, l in enumerate(order)},
+                   "threshold": float(body.get("threshold", 28.0)), "flip_time": bool(body.get("flip_time"))}
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(400, f"bad calibration: {exc}")
+        db.set_setting("camera_calibration", cal)
+        return {"calibration": cal}
+
     # -- fleet ----------------------------------------------------------------
     @app.get("/api/fleet")
     async def fleet():
@@ -725,6 +780,9 @@ def create_app(data_dir: str | Path = "data", port: int = 8000) -> FastAPI:
                         (hub.photo_dir / name).write_bytes(base64.b64decode(b64))
                         paths[img_kind] = "/photos/" + name
                     await ctl.photo_ready(int(msg["heat_id"]), int(msg["attempt"]), paths, msg.get("margin_ms"))
+                elif kind == "snapshot":
+                    await hub.snapshot_ready(base64.b64decode(msg["image"]), int(msg.get("width", 0)),
+                                             int(msg.get("height", 0)))
         except WebSocketDisconnect:
             pass
         finally:

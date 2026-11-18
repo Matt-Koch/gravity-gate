@@ -72,6 +72,7 @@ window.act = act;
 Derby.on((msg, state) => {
   if (msg.type === 'raw') { raw.push(new Date().toLocaleTimeString() + '  ' + msg.line); raw = raw.slice(-200); const r = $('rawlog'); if (r) { r.textContent = raw.join('\n'); r.scrollTop = 1e9; } }
   if (msg.type === 'fleet' && tab === 'fleet' && !document.activeElement?.closest?.('#fleet')) drawFleet();
+  if (msg.type === 'snapshot' && tab === 'settings') showSnapshot(msg.snapshot);
   if (msg.type === 'state') { st = state; if (!raw.length && st.timer?.last_raw) raw = [...st.timer.last_raw]; if (tab === 'race') drawRace(); }
 });
 Derby.connect();
@@ -106,7 +107,7 @@ function drawRace() {
         <button class="big" onclick="act('/api/race/rerun', {}, 'Rerun: timer re-armed')">Rerun Last Race ↺</button>
         ${h ? `<button onclick="saveManual(${h.heat_id})">Save Manual Entry</button>` : ''}
         ${h ? `<button onclick="act('/api/race/force')">Force results</button>` : ''}
-        ${h ? `<button class="warn" onclick="if(confirm('Skip this heat?')) act('/api/race/skip', {heat_id: ${h.heat_id}})">Skip heat</button>` : ''}
+        ${h ? `<button class="warn" onclick="if(confirm('Race this heat later? It moves to the end of the queue.')) act('/api/race/skip', {heat_id: ${h.heat_id}}, 'Moved to the end of the queue')">Skip heat (race later)</button>` : ''}
         ${isSim && st.state === 'staged' ? `<button class="on" onclick="act('/api/race/simulate')">Drop gate (simulator)</button>` : ''}
       </div>
     </div>
@@ -333,11 +334,24 @@ async function drawSettings() {
     <label>Node token<input data-k="node_token" value="${esc(s.node_token)}"></label>
   </div><p class="muted">* verify against your gantry with the raw output log on the Race tab before race day.</p></div>
   <div class="card"><h2>Photo finish</h2><div class="form">
-    <label>Enabled<select data-k="photo_enabled" data-tri>${opt('auto', s.photo_enabled, 'Automatic (when a finish-line camera is online)')}${opt(true, s.photo_enabled, 'On')}${opt(false, s.photo_enabled, 'Off')}</select></label>
+    <label>Enabled<select data-k="photo_enabled" data-tri>${opt('auto', s.photo_enabled, 'Automatic')}${opt(true, s.photo_enabled, 'On')}${opt(false, s.photo_enabled, 'Off')}</select></label>
     <label>Trigger when margin under (ms)<input data-k="photo_margin_ms" data-num value="${s.photo_margin_ms}"></label>
     <label>Post-roll after timer reports (s)<input data-k="photo_post_roll_s" data-num value="${s.photo_post_roll_s}"></label>
     <label>Camera on this Pi<select data-k="camera_kind">${opt('none', s.camera_kind, 'None / on node Pi')}${opt('pi', s.camera_kind, 'Raspberry Pi camera')}${opt('synthetic', s.camera_kind, 'Synthetic (demo)')}</select></label>
-  </div><p class="muted">With the camera on, every heat's finish is captured for the phone gallery; the projector pops up only finishes closer than the margin above.</p></div>
+  </div><p class="muted">Automatic = on whenever a finish-line camera is online. With the camera on, every heat's finish is captured for the phone gallery; the projector pops up only finishes closer than the margin above.</p>
+    <h3 style="margin:18px 0 6px">Camera check &amp; calibration</h3>
+    <p class="muted">Take a check photo, then line up the <b style="color:#ff5050">red finish line</b> with the track's finish line and the
+      <b style="color:#3cc8ff">blue lane boxes</b> with the lanes. Numbers are pixels in the camera picture (the ruler is along the top).</p>
+    <div class="row"><button onclick="cameraCheck()">Take camera check photo</button><span class="muted" id="camsize"></span></div>
+    <div id="camimg" style="margin:10px 0"></div>
+    <div class="form">
+      <label>Finish line x (px)<input id="cal_x" inputmode="numeric"></label>
+      <label>Lane edges y, top to bottom (px, comma separated)<input id="cal_edges" placeholder="0, 66, 133, 200"></label>
+      <label>Lane at the top of the picture<select id="cal_top"><option value="1">Lane 1</option><option value="0">Highest lane number</option></select></label>
+      <label>Strip direction<select id="cal_flip"><option value="0">Time left → right</option><option value="1">Leader on the right (TV style)</option></select></label>
+    </div>
+    <div class="row" style="margin-top:10px"><button class="primary" onclick="saveCalibration()">Save calibration</button>
+      <button onclick="resetCalibration()">Reset to default</button></div></div>
   <div class="card"><h2>Audience phones</h2><div class="form">
     <label>Public URL (blank = auto-detect)<input data-k="public_url" value="${esc(s.public_url)}" placeholder="http://10.42.0.1:8000"></label>
     <label>Wi-Fi name for join QR<input data-k="wifi_ssid" value="${esc(s.wifi_ssid)}"></label>
@@ -350,7 +364,42 @@ async function drawSettings() {
     <label>Sync secret<input data-k="sync_secret" value="${esc(s.sync_secret)}"></label>
   </div><p class="muted">Results sync: ${syncSt.configured ? (syncSt.last_ok ? 'last pushed ' + new Date(syncSt.last_ok * 1000).toLocaleTimeString() : 'not pushed yet') : 'not configured'}${syncSt.last_error ? ' · last error: ' + esc(syncSt.last_error) : ''}${syncSt.pending ? ' · changes pending' : ''}</p></div>
   <button class="primary big" onclick="saveSettings()">Save settings</button>`;
+  window._settings = s;
+  const snap = await api('/api/camera/snapshot');
+  fillCalibration(s, snap);
+  showSnapshot(snap);
 }
+// Camera check: show the finish-line camera's view with the calibration drawn on it.
+function fillCalibration(s, snap) {
+  const cal = s.camera_calibration, lanes = st ? st.lanes.length : s.lane_count;
+  if (cal) {
+    const bands = Object.entries(cal.lane_bands).map(([l, b]) => [Number(l), b]).sort((a, b) => a[1][0] - b[1][0]);
+    $('cal_x').value = cal.finish_x;
+    $('cal_edges').value = [bands[0][1][0], ...bands.map(([, b]) => b[1])].join(', ');
+    $('cal_top').value = bands[0][0] === Math.min(...bands.map(([l]) => l)) ? '1' : '0';
+    $('cal_flip').value = cal.flip_time ? '1' : '0';
+  } else if (snap && snap.width) {
+    $('cal_x').value = Math.round(snap.width / 2);
+    $('cal_edges').value = Array.from({ length: lanes + 1 }, (_, i) => Math.round(i * snap.height / lanes)).join(', ');
+  }
+}
+function showSnapshot(snap) {
+  const el = $('camimg'); if (!el || !snap || !snap.url) return;
+  el.innerHTML = `<img src="${snap.url}" style="max-width:100%;border:1px solid var(--line);border-radius:8px" alt="Finish-line camera check">`;
+  $('camsize').textContent = `${snap.width} × ${snap.height} px · ${new Date(snap.at * 1000).toLocaleTimeString()}`;
+  if (!$('cal_x').value && window._settings) fillCalibration(window._settings, snap);  // first photo: show the default layout
+}
+window.cameraCheck = async () => {
+  try { const r = await api('/api/camera/snapshot', { method: 'POST', body: {} }); if (r.snapshot) showSnapshot(r.snapshot); toast('Photo requested'); }
+  catch (e) { toast(e.message, true); }
+};
+window.saveCalibration = async () => {
+  const edges = $('cal_edges').value.split(',').map((x) => Number(x.trim())).filter((x) => !Number.isNaN(x));
+  await act('/api/camera/calibration', { finish_x: Number($('cal_x').value), edges, lane1_at_top: $('cal_top').value === '1', flip_time: $('cal_flip').value === '1' }, 'Calibration saved');
+  cameraCheck();
+};
+window.resetCalibration = async () => { await act('/api/camera/calibration', { reset: true }, 'Back to the default layout'); drawSettings(); };
+
 window.saveSettings = async () => {
   const body = {};
   document.querySelectorAll('[data-k]').forEach((el) => {

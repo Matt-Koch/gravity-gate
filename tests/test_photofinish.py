@@ -45,3 +45,18 @@ def test_previous_heat_frames_are_excluded():
     pf = make_photo_finish(hframes, hts, cam.cal, new)
     c = pf["crossings"]
     assert c[1] < c[3] < c[2]
+
+
+
+def test_calibration_roundtrip_and_check_image():
+    import numpy as np
+    from gravitygate.photofinish.analysis import calibration_from_dict, calibration_to_dict, check_image
+    default = calibration_from_dict(None, 640, 200, [1, 2, 3])
+    assert default.finish_x == 320 and default.lane_bands[3] == (132, 198)
+    saved = {"finish_x": 400, "lane_bands": {"1": [10, 70], "2": [70, 130], "3": [130, 190]}, "flip_time": True}
+    cal = calibration_from_dict(saved, 640, 200, [1, 2, 3])
+    assert cal.finish_x == 400 and cal.lane_bands[2] == (70, 130) and cal.flip_time
+    assert calibration_to_dict(cal)["lane_bands"]["3"] == [130, 190]
+    img = check_image(np.zeros((200, 640, 3), np.uint8), cal)
+    assert img.size == (640, 200)
+    assert img.getpixel((400, 100))[0] > 200          # red finish line drawn at x=400

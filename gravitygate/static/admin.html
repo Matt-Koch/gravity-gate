@@ -42,6 +42,7 @@
   <button data-tab="racers">Racers &amp; check-in</button>
   <button data-tab="sessions">Sessions</button>
   <button data-tab="standings">Standings</button>
+  <button data-tab="fleet">Fleet</button>
   <button data-tab="settings">Settings</button>
   <div class="foot">Display: <a href="/display" target="_blank">/display</a><br>Spectators: <a href="/s" target="_blank">/s</a><br>QR poster: <a href="/poster" target="_blank">/poster</a></div>
 </aside>
@@ -70,6 +71,7 @@ window.act = act;
 
 Derby.on((msg, state) => {
   if (msg.type === 'raw') { raw.push(new Date().toLocaleTimeString() + '  ' + msg.line); raw = raw.slice(-200); const r = $('rawlog'); if (r) { r.textContent = raw.join('\n'); r.scrollTop = 1e9; } }
+  if (msg.type === 'fleet' && tab === 'fleet' && !document.activeElement?.closest?.('#fleet')) drawFleet();
   if (msg.type === 'state') { st = state; if (!raw.length && st.timer?.last_raw) raw = [...st.timer.last_raw]; if (tab === 'race') drawRace(); }
 });
 Derby.connect();
@@ -77,7 +79,7 @@ setTab(tab);
 window.addEventListener('hashchange', () => { const t = location.hash.slice(1); if (t && t !== tab) setTab(t); });
 
 function draw() {
-  ({ race: drawRace, racers: drawRacers, sessions: drawSessions, standings: drawStandings, settings: drawSettings }[tab])();
+  ({ race: drawRace, racers: drawRacers, sessions: drawSessions, standings: drawStandings, fleet: drawFleet, settings: drawSettings }[tab])();
 }
 
 // ---------------------------------------------------------------- Race
@@ -270,6 +272,41 @@ async function drawStandings() {
     <div class="card"><h2>Pack overall</h2>${table(s.overall || [])}</div>`;
 }
 
+// ---------------------------------------------------------------- Fleet
+async function drawFleet() {
+  const f = await api('/api/fleet');
+  const feat = f.features || {};
+  const hw = (m) => [m.hdmi?.length ? '🖥 display' : '', m.camera ? `📷 ${m.camera === 'pi' ? 'Pi camera' : 'USB camera'}` : '', m.serial?.length ? `⏱ ${m.serial[0]}` : ''].filter(Boolean).join(' · ') || '<span class="muted">nothing attached</span>';
+  const toggle = (m, role, label) => m.roles.includes('brain') && role === 'brain' ? '' :
+    `<button class="${m.roles.includes(role) ? 'on' : ''}" ${m.online ? '' : 'disabled'} onclick="fleetToggle('${m.id}', '${role}')">${label}</button>`;
+  $('main').innerHTML = `
+  <div class="card" id="fleet"><div class="heat-head"><h2>Fleet</h2>
+      <div class="row"><button class="primary" onclick="act('/api/fleet/auto', {}, 'Arranged by hardware').then(drawFleet)">Auto-arrange</button></div></div>
+    <p class="muted">Every box runs the same image. Power one on with a monitor attached and its 4-character ID appears on its screen and here.
+      Pick its role on its own keyboard, or assign it below. The brain is always chosen on that machine's keyboard.</p>
+    <table><tr><th>ID</th><th>Address</th><th>Hardware</th><th>Roles</th><th>Status</th><th></th></tr>
+    ${f.machines.map((m) => `<tr${m.online ? '' : ' class="muted"'}>
+      <td><b style="font-size:1.2em;letter-spacing:.08em">${esc(m.id)}</b>${m.is_self ? ' <span class="badge">this brain</span>' : ''}</td>
+      <td>${esc((m.ips || [m.source_ip])[0] || '')}<br><small class="muted">${esc(m.hostname || '')} · ${esc(m.model || '')}</small></td>
+      <td>${hw(m)}</td>
+      <td class="row">${m.roles.includes('brain') ? '<span class="badge">Brain</span>' : ''}${toggle(m, 'finish', 'Finish line')}${toggle(m, 'display', 'Display')}</td>
+      <td>${m.online ? (m.connected ? '🟢 online' : '🟡 seen, not linked') : '🔴 offline'}</td>
+      <td><button ${m.connected ? '' : 'disabled'} onclick="act('/api/fleet/${m.id}/identify', {}, 'Look for the flashing screen')">Identify</button></td></tr>`).join('')
+      || '<tr><td colspan="6" class="muted">No machines yet. Boot the other boxes from the same image on this network.</td></tr>'}</table></div>
+  <div class="card"><h2>What the hardware enables right now</h2>
+    <p>${feat.finish_online ? '🟢' : '⚪'} Finish-line machine ${feat.finish_online ? 'online' : 'not online'} → timer source: <b>${esc({ remote: 'the finish-line machine', serial: 'USB timer on the brain', simulator: 'simulator', none: 'manual entry' }[feat.timer_kind] || feat.timer_kind || '')}</b></p>
+    <p>${feat.photo_available ? '🟢' : '⚪'} Photo finish ${feat.photo_available ? (feat.photo_active ? 'available and on' : 'available but switched off in Settings') : 'hidden: no finish-line camera online'}</p>
+    <p>${feat.displays ? '🟢' : '⚪'} ${feat.displays || 0} display machine(s) showing the race screen</p></div>`;
+}
+window.fleetToggle = async (id, role) => {
+  const f = await api('/api/fleet');
+  const m = f.machines.find((x) => x.id === id);
+  const cur = m.roles.filter((r) => r !== 'brain');
+  const roles = cur.includes(role) ? cur.filter((r) => r !== role) : [...cur, role];
+  await act('/api/fleet/' + id, { roles }, `${id}: ${roles.length ? roles.join(' + ') : 'standby'}`);
+  drawFleet();
+};
+
 // ---------------------------------------------------------------- Settings
 async function drawSettings() {
   const [s, ports, syncSt] = await Promise.all([api('/api/settings'), api('/api/serial-ports'), api('/api/sync/status')]);
@@ -290,13 +327,13 @@ async function drawSettings() {
     <label>Admin PIN (blank = none)<input data-k="admin_pin" value="${esc(s.admin_pin)}"></label>
   </div></div>
   <div class="card"><h2>Timer</h2><div class="form">
-    <label>Source<select data-k="timer_kind">${opt('serial', s.timer_kind, 'Serial port on this Pi')}${opt('remote', s.timer_kind, 'Bottom-of-track node Pi')}${opt('simulator', s.timer_kind, 'Simulator (rehearsal)')}${opt('none', s.timer_kind, 'None (manual entry)')}</select></label>
+    <label>Source<select data-k="timer_kind">${opt('auto', s.timer_kind, 'Automatic (finish-line machine, else USB timer here, else simulator)')}${opt('serial', s.timer_kind, 'Serial port on this Pi')}${opt('remote', s.timer_kind, 'Bottom-of-track node Pi')}${opt('simulator', s.timer_kind, 'Simulator (rehearsal)')}${opt('none', s.timer_kind, 'None (manual entry)')}</select></label>
     <label>Serial port<input data-k="timer_port" value="${esc(s.timer_port)}" list="ports"><datalist id="ports">${ports.map((p) => `<option value="${esc(p.device)}">${esc(p.description)}</option>`).join('')}</datalist></label>
     <label>Timer model<select data-k="timer_profile">${Object.entries(s.timer_profiles).map(([k, p]) => opt(k, s.timer_profile, p.name + (p.verified ? '' : ' *'))).join('')}</select></label>
     <label>Node token<input data-k="node_token" value="${esc(s.node_token)}"></label>
   </div><p class="muted">* verify against your gantry with the raw output log on the Race tab before race day.</p></div>
   <div class="card"><h2>Photo finish</h2><div class="form">
-    <label>Enabled<select data-k="photo_enabled" data-bool>${opt(false, s.photo_enabled, 'Off')}${opt(true, s.photo_enabled, 'On')}</select></label>
+    <label>Enabled<select data-k="photo_enabled" data-tri>${opt('auto', s.photo_enabled, 'Automatic (when a finish-line camera is online)')}${opt(true, s.photo_enabled, 'On')}${opt(false, s.photo_enabled, 'Off')}</select></label>
     <label>Trigger when margin under (ms)<input data-k="photo_margin_ms" data-num value="${s.photo_margin_ms}"></label>
     <label>Post-roll after timer reports (s)<input data-k="photo_post_roll_s" data-num value="${s.photo_post_roll_s}"></label>
     <label>Camera on this Pi<select data-k="camera_kind">${opt('none', s.camera_kind, 'None / on node Pi')}${opt('pi', s.camera_kind, 'Raspberry Pi camera')}${opt('synthetic', s.camera_kind, 'Synthetic (demo)')}</select></label>
@@ -320,6 +357,7 @@ window.saveSettings = async () => {
     let v = el.value;
     if (el.hasAttribute('data-num')) v = Number(v);
     if (el.hasAttribute('data-bool')) v = v === 'true';
+    if (el.hasAttribute('data-tri')) v = v === 'auto' ? 'auto' : v === 'true';
     if (el.hasAttribute('data-list')) v = v.split(',').map((x) => Number(x.trim())).filter(Boolean);
     body[el.dataset.k] = v;
   });

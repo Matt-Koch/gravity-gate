@@ -113,6 +113,22 @@ The typical day is **round-robin qualifiers → per-den standings and awards →
 - **Offline-first**: race day never waits on the internet. Changes queue up and push in the background with retry and backoff whenever an uplink is available.
 - Service-account sync (gspread) is also supported for IT-managed packs, along with CSV export of the roster and results.
 
+### 🧩 Fleet mode: image once, arrange on the day
+- **One image for every box.** Raspberry Pis and x86 mini PCs such as Protectli run the identical install; a box's job is decided when it boots, not when it's imaged.
+- **Every box introduces itself on its own HDMI screen** (the Linux text console, so no desktop is needed): a big 4-character ID from its MAC address, its IP, and what's plugged in (display, Pi camera, USB timer).
+- **Pick a role from that box's keyboard** (`B` Brain, `F` Finish line, `D` Display), or leave it alone and assign it **by ID from the brain**, on the brain's own monitor and keyboard or in the web admin's Fleet tab.
+- **Zero configuration**: machines find each other by UDP broadcast, so there's nothing to type and no fixed IPs. An optional shared **fleet key** signs every message, so a stray laptop can't pose as the brain.
+- **Auto-arrange** proposes roles from the hardware: the box with a timer port and camera becomes the finish line, and boxes with monitors become displays.
+- **Features follow the hardware.** A finish-line box switches the timer to it and turns photo finish on when it has a camera; with no camera online, photo finish stays hidden. Display boxes open the race screen full-screen on HDMI, with sound and no mouse needed.
+- **Identify** flashes a box's ID on its screen so you can find it in the gym.
+- **Resilient**: roles persist on each box and on the brain; a box chosen offline from its keyboard keeps that choice; role processes restart if they crash.
+
+<p align="center">
+  <img src="docs/screenshots/console-boot.png" width="49%" alt="A freshly booted box showing its ID A3F2, IP, detected hardware and role keys on HDMI">
+  <img src="docs/screenshots/console-fleet.png" width="49%" alt="The brain's own console listing every machine by ID with roles">
+</p>
+<p align="center"><img src="docs/screenshots/admin-fleet.png" width="80%" alt="Fleet tab in race control after auto-arrange"></p>
+
 ### 🧰 Race control
 - One screen for the race director: Go to Next Race, Rerun Last Race, Manual Entry, Force Results, Skip Heat, display modes, Sound On/Off, timer status, and the raw timer feed.
 - Check-in and inspection checkboxes, quick-add racers, den editing.
@@ -177,6 +193,21 @@ Both install as systemd services that start on boot. Then, in **Admin → Settin
 3. **Google Sheets**: paste the roster link, plus the Apps Script URL and secret for results sync.
 4. **Photo finish**: turn it on, set the close-finish margin, and calibrate the finish line.
 
+### Fleet: same image on every box (Pi or Protectli)
+```bash
+# On one box with Raspberry Pi OS Lite (Bookworm) or Debian 12, from a clone of this repo:
+sudo ./deploy/install-fleet.sh "our-fleet-passphrase"   # passphrase optional; same on every box
+sudo ./deploy/prepare-image.sh && sudo poweroff         # then clone the SD card / disk to the others
+```
+1. Boot every box with a monitor attached. Each shows its ID, IP and hardware.
+2. On the box that will run race control, press **B** (Brain). Its screen shows the race-control address.
+3. On the brain press **Enter** for the Fleet screen, then **A** to auto-arrange. Or select each ID and press **F**/**D**.
+   You can also press **F** or **D** on any box's own keyboard, or use **Admin → Fleet** from a laptop.
+4. Display boxes switch their HDMI to the race screen (Ctrl+Alt+F1 shows the role picker again).
+   The finish-line box starts reading the timer and camera.
+
+Each box renames itself `gg-<id>.local`. Logs live in `/var/lib/gravitygate/logs/` and `journalctl -u gravitygate-agent`.
+
 ### Verify your timer before race day
 ```bash
 gravitygate timer-capture --serial /dev/ttyUSB0 --profile generic --lanes 3
@@ -228,6 +259,7 @@ bracket in a bad state.
 | `gravitygate/sync.py`, `roster.py` | Google Sheets roster pull, results push, CSV import/export |
 | `gravitygate/server.py` | FastAPI REST + WebSocket hub, QR codes, node link |
 | `gravitygate/node.py` | Bottom-of-track agent (timer + camera → hub) |
+| `gravitygate/fleet/` | Fleet mode: hardware identity, UDP discovery, role registry on the brain, per-box agent and role supervisor, HDMI console role picker |
 | `gravitygate/static/` | Admin, projector display, phone companion, bracket-line renderer, and QR poster (plain HTML/JS, no build step) |
 
 Storage is a single SQLite file in `data/`; copy it to a USB stick to back up. Everything runs offline.
@@ -240,7 +272,8 @@ pytest
 The tests cover the schedulers (lane balance, runs per lane, every pairing met in a full round robin, opponent variety, spacing), scoring (dropping the fastest and slowest runs, heat points), the elimination
 engine (fastest car wins; nobody is eliminated before two losses; single, double and triple formats;
 lane-rotated matchups; ties), timer parsing, reruns, the photo-finish pipeline, the QR endpoints,
-and full API flows using the simulator.
+full API flows using the simulator, and fleet mode (hardware detection against a fake `/sys`,
+signed beacons, auto-arrange, console keys, and a real UDP-discovery → WebSocket → role-process run).
 
 ## Roadmap / backlog
 - [ ] **Dead-simple live streaming to YouTube or Facebook**: a one-click "Go live" that streams the projector display, with an optional track camera, to an RTMP stream key from the Pi.
@@ -251,6 +284,9 @@ and full API flows using the simulator.
 - [ ] Optional "DerbyMaster-compatible" elimination rules once its exact behavior is confirmed
 - [ ] Hardware-verified timer profiles (contributions welcome)
 - [ ] Multiple sessions running at once (e.g. siblings / adult open class)
+- [ ] Fleet: USB webcam (V4L2) capture for x86 finish-line boxes (detected today, but only the Pi camera captures)
+- [ ] Fleet: a "start gate" role (GPIO gate sensor for an absolute t₀) and a "scoreboard" display variant
+- [ ] Fleet: a ready-made SD card image download
 
 See [`docs/PLAN.md`](docs/PLAN.md) for the full design notes.
 

@@ -88,7 +88,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "standings_method": "average",  # "average" run time | "points" (heat points)
     "drop_runs": "none",        # "none" | "slowest" | "fastest_slowest"
     "photo_margin_ms": 10.0,
-    "photo_enabled": False,
+    "photo_enabled": "auto",        # "auto" = on whenever a finish-line camera is online
     "photo_post_roll_s": 0.3,
     "auto_advance": False,
     "sound": True,
@@ -100,7 +100,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "roster_csv_url": "",
     "auto_advance_s": 8,
     "current_session": None,
-    "timer_kind": "simulator",      # simulator | serial | remote | none
+    "timer_kind": "auto",           # auto | simulator | serial | remote | none
     "timer_port": "/dev/ttyUSB0",
     "timer_profile": "generic",
     "camera_kind": "none",          # none | pi | synthetic

@@ -1,0 +1,19 @@
+#!/bin/sh
+# Full-screen browser on the HDMI output, used by the "display" role.
+#   gravitygate-kiosk http://<brain>:8000/display?kiosk=1
+# cage is a minimal Wayland kiosk compositor: one app, full screen, no desktop.
+# Runs the browser as an unprivileged user; seatd hands it the display and input.
+set -eu
+URL="$1"
+KUSER="${GRAVITYGATE_KIOSK_USER:-gravitygate}"
+KUID="$(id -u "$KUSER")"
+RUNDIR="/run/user/$KUID"
+mkdir -p "$RUNDIR" && chown "$KUSER" "$RUNDIR" && chmod 700 "$RUNDIR"
+BROWSER="$(command -v chromium-browser || command -v chromium || true)"
+[ -n "$BROWSER" ] || { echo "chromium is not installed" >&2; exit 1; }
+# Leave tty1 to the role picker: Ctrl+Alt+F1 shows it, Ctrl+Alt+F7 comes back here.
+exec runuser -u "$KUSER" -- env XDG_RUNTIME_DIR="$RUNDIR" LIBSEAT_BACKEND=seatd \
+  cage -s -- "$BROWSER" --kiosk --noerrdialogs --disable-infobars --no-first-run \
+  --disable-session-crashed-bubble --disable-features=Translate \
+  --autoplay-policy=no-user-gesture-required --check-for-update-interval=31536000 \
+  --user-data-dir="$RUNDIR/chromium" "$URL"

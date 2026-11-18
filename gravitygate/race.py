@@ -44,6 +44,7 @@ class RaceController:
         self.photo_requesters: set[PhotoRequester] = set()
         self.change_listeners: list[Callable[[], None]] = []  # e.g. Sheets sync
         self.arm_listeners: list[Callable[[dict], None]] = []     # e.g. local camera
+        self.feature_probe: Callable[[], dict] | None = None      # set by the hub: what hardware is online
         self.lock = asyncio.Lock()
         self.last_photo: dict | None = None
         self.heat_finished_at: list[float] = []
@@ -392,6 +393,7 @@ class RaceController:
             "timer": self.timer.status(),
             "photo": self.last_photo,
             "awards_revealed": self.awards_revealed,
+            "features": self.feature_probe() if self.feature_probe else {},
             "server_time": time.time(),
         }
 

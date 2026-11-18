@@ -236,6 +236,26 @@ binary is not available to this build environment, so this step is pending.
 * **Qualifier spec**: lanes and runs per lane in Settings; lane round robin is
   the default qualifier; standings toggle and drop-runs in Settings.
 
+## 13a. Fleet mode (added later)
+
+Every box gets the same image; roles are decided on the day.
+
+* `gravitygate agent` runs on tty1 (HDMI console) as a systemd service. It
+  identifies the box (ID = last 4 hex of the wired MAC, IPs, HDMI connected
+  via /sys/class/drm, CSI/USB camera via /sys/class/video4linux, USB serial
+  ports), shows a curses role picker, and supervises role processes.
+* Discovery: UDP broadcast on port 47263. Agents beacon their hardware and
+  roles; the brain beacons its port, and agents take its IP from the packet.
+  An optional fleet key HMAC-signs beacons and gates the WebSockets.
+* Agents keep a WebSocket to the brain (`/ws/agent`). The brain stores
+  assignments in its DB and pushes them. Roles chosen on a box's keyboard
+  while offline are accepted on reconnect (no wall-clock comparison, since
+  Pis may boot without an RTC or NTP).
+* Roles: brain (only chosen locally), finish (gravitygate node: serial +
+  camera), display (cage + Chromium kiosk on HDMI). Auto-arrange suggests
+  roles from hardware. Features follow hardware: timer_kind "auto" and
+  photo_enabled "auto" resolve from what's online.
+
 ## 14. Backlog
 
 * Dead-simple live streaming to YouTube / Facebook (RTMP stream key, one

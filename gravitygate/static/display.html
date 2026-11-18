@@ -86,6 +86,8 @@ let join = { spectator_url: location.host + '/s', wifi_ssid: '' };
 const shortUrl = () => join.spectator_url.replace(/^https?:\/\//, '');
 
 document.getElementById('soundgate').onclick = (e) => { e.currentTarget.remove(); Derby.beep('staged'); document.documentElement.requestFullscreen?.().catch(() => {}); };
+// Fleet display machines run a kiosk browser with autoplay allowed and no mouse: skip the click gate.
+if (new URLSearchParams(location.search).has('kiosk')) document.getElementById('soundgate').remove();
 
 async function loadJoin() {
   try { join = await Derby.api('/api/join-info'); } catch (e) { /* keep default */ }

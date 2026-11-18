@@ -7,6 +7,7 @@ import csv
 import io
 import json
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -18,6 +19,9 @@ from fastapi.staticfiles import StaticFiles
 
 from . import roster, sync
 from .db import Database
+from .fleet import protocol as fleet_protocol
+from .fleet import roles as fleet_roles
+from .fleet.registry import FleetRegistry
 from .race import RaceController
 from .timers import PROFILES, BaseTimer, ParsedResult, SimulatedTimer, make_timer
 
@@ -77,7 +81,8 @@ class RemoteTimer(BaseTimer):
 
 
 class Hub:
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path, port: int = 8000):
+        self.port = port
         self.data_dir = data_dir
         self.photo_dir = data_dir / "photos"
         self.photo_dir.mkdir(parents=True, exist_ok=True)
@@ -92,18 +97,107 @@ class Hub:
         self.controller.subscribers.add(self.broadcast)
         self.controller.photo_requesters.add(self.request_photo)
         self.controller.arm_listeners.append(lambda heat: self.camera and self.camera.mark_armed())
+        # Fleet: the same image on every box; this hub is the brain they report to.
+        self.fleet_key = os.environ.get("GRAVITYGATE_FLEET_KEY", "")
+        self.fleet = FleetRegistry(self.db, os.environ.get("GRAVITYGATE_MACHINE_ID", ""))
+        self.fleet.listeners.append(self._fleet_changed)
+        self.controller.feature_probe = self.features
+        self._fleet_tasks: list[asyncio.Task] = []
+
+    # -- fleet & features ----------------------------------------------------
+    def features(self) -> dict:
+        """What the hardware that's online right now can do. The UI hides what isn't there."""
+        f = self.fleet.features()
+        node_cams = [n.get("camera") for n in self.node_info.values() if n.get("camera") not in (None, "none")]
+        f["nodes_connected"] = len(self.nodes)
+        f["photo_available"] = bool(self.camera is not None or node_cams or f.get("finish_camera") == "pi")
+        setting = self.db.get_setting("photo_enabled")
+        f["photo_active"] = f["photo_available"] and setting is not False and setting != "off"
+        f["timer_kind"] = self.resolve_timer_kind()
+        return f
+
+    def resolve_timer_kind(self) -> str:
+        """'auto' picks the timer from what's plugged in: finish-line machine > local serial > simulator."""
+        kind = self.db.get_setting("timer_kind") or "auto"
+        if kind != "auto":
+            return kind
+        if self.nodes or self.fleet.features().get("finish_online"):
+            return "remote"
+        from .fleet.identity import detect_serial
+        if detect_serial():
+            return "serial"
+        return "simulator"
+
+    def _fleet_changed(self) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._after_fleet_change())
+
+    async def _after_fleet_change(self) -> None:
+        await self.fleet.broadcast_fleet()
+        await self.controller.publish("fleet", {"fleet": self.fleet.snapshot(), "features": self.features()})
+        await self.retime_if_needed()
+
+    async def retime_if_needed(self) -> None:
+        want = self.resolve_timer_kind()
+        have = {"RemoteTimer": "remote", "SerialTimer": "serial", "SimulatedTimer": "simulator",
+                "NullTimer": "none"}.get(type(self.controller.timer).__name__)
+        if want != have:
+            await self.configure_timer()
+            await self.controller.publish()
+
+    async def start_fleet(self) -> None:
+        if os.environ.get("GRAVITYGATE_FLEET", "1") == "0":
+            return
+        if not self.fleet.self_id:
+            from .fleet.identity import identify
+            self.fleet.self_id = (await asyncio.to_thread(identify)).id
+        try:
+            self._fleet_transport = await fleet_protocol.listen(self.fleet.on_beacon, self.fleet_key)
+        except OSError as exc:
+            log.warning("fleet discovery disabled: %s", exc)
+            self._fleet_transport = None
+
+        async def beacon():
+            while True:
+                fleet_protocol.send({"t": "brain", "id": self.fleet.self_id, "port": self.port,
+                                     "event": self.db.get_setting("event_name")}, self.fleet_key)
+                await asyncio.sleep(2)
+
+        async def sweep():  # notice machines going quiet
+            seen = None
+            while True:
+                await asyncio.sleep(5)
+                now = tuple((m["id"], m["online"]) for m in self.fleet.snapshot())
+                if now != seen:
+                    seen = now
+                    await self._after_fleet_change()
+
+        self._fleet_tasks = [asyncio.create_task(beacon()), asyncio.create_task(sweep())]
+
+    async def stop_fleet(self) -> None:
+        for t in self._fleet_tasks:
+            t.cancel()
+        if getattr(self, "_fleet_transport", None):
+            self._fleet_transport.close()
 
     # -- timers ------------------------------------------------------------
     async def configure_timer(self) -> None:
         await self.controller.timer.stop()
         s = self.db.all_settings()
-        kind = s.get("timer_kind", "simulator")
+        kind = self.resolve_timer_kind()
         lanes = int(s["lane_count"])
         if kind == "remote":
             timer: BaseTimer = RemoteTimer(lanes, self.controller.on_timer_event, self)
         else:
+            port = s.get("timer_port") or "/dev/ttyUSB0"
+            if s.get("timer_kind") == "auto":
+                from .fleet.identity import detect_serial
+                port = (detect_serial() or [port])[0]
             timer = make_timer(kind, lanes, self.controller.on_timer_event,
-                               port=s.get("timer_port", "/dev/ttyUSB0"),
+                               port=port,
                                profile=s.get("timer_profile", "generic"))
         self.controller.set_timer(timer)
         await timer.start()
@@ -176,15 +270,17 @@ class Hub:
             q.put_nowait(msg)
 
 
-def create_app(data_dir: str | Path = "data") -> FastAPI:
-    hub = Hub(Path(data_dir))
+def create_app(data_dir: str | Path = "data", port: int = 8000) -> FastAPI:
+    hub = Hub(Path(data_dir), port)
     db, ctl = hub.db, hub.controller
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await hub.configure_timer()
         hub.sync.start()
+        await hub.start_fleet()
         yield
+        await hub.stop_fleet()
         await hub.sync.stop()
         await ctl.timer.stop()
         if hub.camera:
@@ -512,11 +608,82 @@ def create_app(data_dir: str | Path = "data") -> FastAPI:
         finally:
             hub.clients.discard(ws)
 
+    # -- fleet ----------------------------------------------------------------
+    @app.get("/api/fleet")
+    async def fleet():
+        return {"machines": hub.fleet.snapshot(), "features": hub.features(),
+                "roles": {k: {"name": r.name, "blurb": r.blurb, "assignable": k in fleet_roles.ASSIGNABLE}
+                          for k, r in fleet_roles.ROLES.items()}}
+
+    @app.post("/api/fleet/auto", dependencies=[Depends(admin)])
+    async def fleet_auto():
+        return {"plan": await hub.fleet.auto_arrange()}
+
+    @app.post("/api/fleet/{machine_id}", dependencies=[Depends(admin)])
+    async def fleet_assign(machine_id: str, body: dict = Body(...)):
+        try:
+            return {"roles": await hub.fleet.assign(machine_id.upper(), body.get("roles") or [])}
+        except KeyError:
+            raise HTTPException(404, "no such machine")
+
+    @app.post("/api/fleet/{machine_id}/identify", dependencies=[Depends(admin)])
+    async def fleet_identify(machine_id: str):
+        await hub.fleet.identify(machine_id.upper())
+        return {"ok": True}
+
+    @app.websocket("/ws/agent")
+    async def ws_agent(ws: WebSocket):
+        """Every fleet machine's agent keeps one of these open to the brain."""
+        await ws.accept()
+        if hub.fleet_key and ws.query_params.get("key") != hub.fleet_key:
+            await ws.close(code=4401)
+            return
+        mid = None
+        local = (ws.client.host if ws.client else "") in ("127.0.0.1", "::1", "localhost", "testclient")
+
+        async def send(msg: dict) -> None:
+            await ws.send_text(json.dumps(msg, default=str))
+
+        try:
+            while True:
+                msg = json.loads(await ws.receive_text())
+                kind = msg.get("type")
+                if kind == "hello":
+                    mid = (msg.get("machine") or {}).get("id")
+                    await hub.fleet.agent_hello(msg["machine"], msg.get("roles") or [], bool(msg.get("local_change")),
+                                                send, ws.client.host if ws.client else None)
+                elif mid is None:
+                    continue
+                elif kind == "set_roles":
+                    await hub.fleet.agent_local_change(mid, msg.get("roles") or [])
+                elif kind in ("assign", "auto_arrange", "identify"):
+                    # Fleet commands typed on the brain's own console. Only the brain's
+                    # agent, connecting over loopback, may arrange other machines.
+                    if not local or fleet_roles.BRAIN not in hub.fleet.machines.get(mid, {}).get("roles", []):
+                        await send({"type": "error", "message": "Only the brain's own console can arrange machines."})
+                        continue
+                    try:
+                        if kind == "assign":
+                            roles = await hub.fleet.assign(str(msg.get("id", "")).upper(), msg.get("roles") or [])
+                            await send({"type": "message", "message": f"{msg.get('id')}: {fleet_roles.label(roles)}"})
+                        elif kind == "auto_arrange":
+                            plan = await hub.fleet.auto_arrange()
+                            await send({"type": "message", "message": f"Auto-arranged {len(plan)} machine(s)."})
+                        else:
+                            await hub.fleet.identify(str(msg.get("id", "")).upper())
+                    except KeyError:
+                        await send({"type": "error", "message": f"No machine {msg.get('id')} on the network."})
+        except WebSocketDisconnect:
+            pass
+        finally:
+            if mid:
+                hub.fleet.agent_gone(mid)
+
     @app.websocket("/ws/node")
     async def ws_node(ws: WebSocket):
-        token = db.get_setting("node_token") or ""
+        tokens = {t for t in (db.get_setting("node_token") or "", hub.fleet_key) if t}
         await ws.accept()
-        if token and ws.query_params.get("token") != token:
+        if tokens and ws.query_params.get("token") not in tokens:
             await ws.close(code=4401)
             return
         q: asyncio.Queue = asyncio.Queue()
@@ -539,6 +706,8 @@ def create_app(data_dir: str | Path = "data") -> FastAPI:
                 kind = msg.get("type")
                 if kind == "hello":
                     hub.node_info[node_id].update(msg.get("info", {}))
+                    await hub.retime_if_needed()   # timer 'auto' -> results now come from this node
+                    await hub._after_fleet_change()
                 elif kind == "status":
                     hub.node_info[node_id].update(msg.get("status", {}))
                     await ctl.publish("timer", {"timer": ctl.timer.status()})
@@ -562,6 +731,7 @@ def create_app(data_dir: str | Path = "data") -> FastAPI:
             send_task.cancel()
             hub.nodes.pop(ws, None)
             hub.node_info.pop(node_id, None)
+            hub._fleet_changed()
             await ctl.publish("timer", {"timer": ctl.timer.status()})
 
     return app

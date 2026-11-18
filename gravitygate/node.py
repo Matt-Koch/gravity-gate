@@ -99,7 +99,7 @@ class Node:
         backoff = 1.0
         while True:
             try:
-                async with websockets.connect(self.hub_url, ping_interval=10) as ws:
+                async with websockets.connect(self.hub_url, ping_interval=10, proxy=None) as ws:
                     self.ws = ws
                     backoff = 1.0
                     log.info("connected to hub %s", self.hub_url)

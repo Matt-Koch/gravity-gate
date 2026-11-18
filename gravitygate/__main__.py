@@ -25,6 +25,14 @@ def main(argv: list[str] | None = None) -> int:
     n.add_argument("--token", default="")
     n.add_argument("--calibration", help="JSON file with finish_x and lane_bands")
 
+    a = sub.add_parser("agent", help="fleet agent: role picker on the HDMI console + role supervisor")
+    a.add_argument("--config", default="/etc/gravitygate/agent.json")
+    a.add_argument("--state-dir", help="where roles, logs and the race database live")
+    a.add_argument("--fleet-key", help="shared secret baked into every image (optional)")
+    a.add_argument("--headless", action="store_true", help="no console UI (log only)")
+
+    i = sub.add_parser("identify", help="print this machine's ID, IP and detected hardware")
+
     c = sub.add_parser("timer-capture", help="print raw timer output and how it parses")
     c.add_argument("--serial", default="/dev/ttyUSB0")
     c.add_argument("--profile", default="generic")
@@ -40,11 +48,31 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "serve":
         import uvicorn
         from .server import create_app
-        uvicorn.run(create_app(args.data), host=args.host, port=args.port, log_level="info")
+        uvicorn.run(create_app(args.data, args.port), host=args.host, port=args.port, log_level="info")
     elif args.cmd == "node":
         from .node import Node
         asyncio.run(Node(args.hub, args.lanes, args.serial, args.profile, args.camera, args.token,
                          args.calibration).run())
+    elif args.cmd == "agent":
+        from .fleet.agent import Agent, AgentConfig
+        cfg = AgentConfig.load(args.config, state_dir=args.state_dir, fleet_key=args.fleet_key)
+        ui = None
+        if not args.headless and sys.stdin.isatty() and sys.stdout.isatty():
+            from .fleet.console import ConsoleUI
+            ui = ConsoleUI()
+            import os
+            os.makedirs(cfg.state_dir, exist_ok=True)
+            logging.getLogger().handlers.clear()  # keep log lines off the console screen
+            logging.basicConfig(filename=f"{cfg.state_dir}/agent.log", level=logging.INFO,
+                                format="%(asctime)s %(name)s %(message)s")
+        try:
+            asyncio.run(Agent(cfg).run(ui))
+        except KeyboardInterrupt:
+            pass
+    elif args.cmd == "identify":
+        import json
+        from .fleet.identity import identify
+        print(json.dumps(identify().to_dict(), indent=2))
     elif args.cmd == "timer-capture":
         return asyncio.run(_capture(args))
     elif args.cmd == "demo-roster":
